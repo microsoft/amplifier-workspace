@@ -123,7 +123,7 @@ class TestSetupWorkspace:
         config = WorkspaceConfig()
         setup_workspace(tmp_path, config)
         mock_git.initial_commit.assert_called_once()
-        args = mock_git.initial_commit.call_args[0]
+        args = mock_git.initial_commit.call_args.args
         assert "workspace" in args[1].lower()
 
     @patch("amplifier_workspace.workspace._git")
