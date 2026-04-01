@@ -3,7 +3,12 @@
 import json
 from unittest.mock import MagicMock, patch
 
-from amplifier_workspace.upgrade import _check_for_update, _get_install_info
+from amplifier_workspace.upgrade import (
+    _check_for_update,
+    _do_upgrade,
+    _get_install_info,
+    run_upgrade,
+)
 
 
 class TestGetInstallInfo:
@@ -184,3 +189,140 @@ class TestCheckForUpdate:
 
         assert update_available is True
         assert "could not check" in message.lower() or "remote" in message.lower()
+
+
+_SAMPLE_INFO = {
+    "source": "git",
+    "version": "1.0.0",
+    "commit": "abcdef1234567890abcdef1234567890abcdef12",
+    "url": "https://github.com/microsoft/amplifier-workspace",
+}
+
+
+class TestRunUpgrade:
+    def test_check_only_prints_status_and_does_not_call_do_upgrade(self, capsys):
+        """run_upgrade(check_only=True) prints install status but never calls _do_upgrade."""
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                return_value=_SAMPLE_INFO,
+            ),
+            patch("amplifier_workspace.upgrade._do_upgrade") as mock_do_upgrade,
+        ):
+            run_upgrade(check_only=True)
+
+        mock_do_upgrade.assert_not_called()
+        captured = capsys.readouterr()
+        # Should have printed version/commit/source info
+        assert "1.0.0" in captured.out or "git" in captured.out
+
+    def test_skips_install_when_already_up_to_date(self, capsys):
+        """run_upgrade skips _do_upgrade when _check_for_update returns False."""
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                return_value=_SAMPLE_INFO,
+            ),
+            patch(
+                "amplifier_workspace.upgrade._check_for_update",
+                return_value=(False, "up to date (commit abcdef12)"),
+            ),
+            patch("amplifier_workspace.upgrade._do_upgrade") as mock_do_upgrade,
+        ):
+            run_upgrade()
+
+        mock_do_upgrade.assert_not_called()
+        captured = capsys.readouterr()
+        assert "up to date" in captured.out.lower() or "already" in captured.out.lower()
+
+    def test_installs_when_update_available(self):
+        """run_upgrade calls _do_upgrade when _check_for_update returns True."""
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                return_value=_SAMPLE_INFO,
+            ),
+            patch(
+                "amplifier_workspace.upgrade._check_for_update",
+                return_value=(True, "update available (abcd1234 → efgh5678)"),
+            ),
+            patch(
+                "amplifier_workspace.upgrade._do_upgrade", return_value=True
+            ) as mock_do_upgrade,
+            patch("amplifier_workspace.upgrade._run_doctor_after_upgrade"),
+        ):
+            run_upgrade()
+
+        mock_do_upgrade.assert_called_once_with(_SAMPLE_INFO)
+
+    def test_force_skips_version_check(self):
+        """run_upgrade(force=True) skips _check_for_update entirely."""
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                return_value=_SAMPLE_INFO,
+            ),
+            patch("amplifier_workspace.upgrade._check_for_update") as mock_check,
+            patch("amplifier_workspace.upgrade._do_upgrade", return_value=True),
+            patch("amplifier_workspace.upgrade._run_doctor_after_upgrade"),
+        ):
+            run_upgrade(force=True)
+
+        mock_check.assert_not_called()
+
+
+class TestDoUpgrade:
+    def test_tries_uv_first(self):
+        """_do_upgrade uses uv when available, passing --force flag."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with (
+            patch(
+                "amplifier_workspace.upgrade.shutil.which",
+                side_effect=lambda cmd: "/usr/bin/uv" if cmd == "uv" else None,
+            ),
+            patch(
+                "amplifier_workspace.upgrade.subprocess.run",
+                return_value=mock_result,
+            ) as mock_run,
+        ):
+            result = _do_upgrade(_SAMPLE_INFO)
+
+        assert result is True
+        args = mock_run.call_args[0][0]
+        assert "uv" in args[0]
+        assert "--force" in args
+
+    def test_falls_back_to_pip_when_no_uv(self):
+        """_do_upgrade falls back to pip when uv is not found."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with (
+            patch(
+                "amplifier_workspace.upgrade.shutil.which",
+                side_effect=lambda cmd: "/usr/bin/pip" if cmd == "pip" else None,
+            ),
+            patch(
+                "amplifier_workspace.upgrade.subprocess.run",
+                return_value=mock_result,
+            ) as mock_run,
+        ):
+            result = _do_upgrade(_SAMPLE_INFO)
+
+        assert result is True
+        args = mock_run.call_args[0][0]
+        assert "pip" in args[0]
+
+    def test_returns_false_when_neither_uv_nor_pip_found(self, capsys):
+        """_do_upgrade returns False and prints ERROR when no installer is available."""
+        with patch(
+            "amplifier_workspace.upgrade.shutil.which",
+            return_value=None,
+        ):
+            result = _do_upgrade(_SAMPLE_INFO)
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "error" in captured.out.lower() or "error" in captured.err.lower()

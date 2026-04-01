@@ -2,7 +2,9 @@
 
 import importlib.metadata
 import json
+import shutil
 import subprocess
+import sys
 
 _PACKAGE_NAME = "amplifier-workspace"
 _GIT_URL = "https://github.com/microsoft/amplifier-workspace"
@@ -112,3 +114,71 @@ def _check_for_update(info: dict) -> tuple[bool, str]:
 
     # Fallback for any unrecognized source
     return (True, "unknown install source — upgrading to be safe")
+
+
+def _do_upgrade(info: dict) -> bool:
+    """Reinstall amplifier-workspace. Tries uv first, falls back to pip.
+
+    Returns True on success, False on failure.
+    """
+    url = info.get("url") or _GIT_URL
+    git_url = f"git+{url}"
+
+    uv_path = shutil.which("uv")
+    if uv_path:
+        result = subprocess.run(
+            ["uv", "tool", "install", "--force", git_url],
+            capture_output=False,
+        )
+        return result.returncode == 0
+
+    pip_path = shutil.which("pip")
+    if pip_path:
+        result = subprocess.run(
+            ["pip", "install", "--upgrade", git_url],
+            capture_output=False,
+        )
+        return result.returncode == 0
+
+    print("ERROR: neither uv nor pip found — cannot upgrade")
+    return False
+
+
+def _run_doctor_after_upgrade() -> None:
+    """Lazily import and run doctor.run_doctor() to verify new install."""
+    import importlib
+
+    doctor = importlib.import_module("amplifier_workspace.doctor")
+    doctor.run_doctor()
+
+
+def run_upgrade(*, force: bool = False, check_only: bool = False) -> None:
+    """Run the upgrade workflow.
+
+    Args:
+        force: Skip version check and reinstall unconditionally.
+        check_only: Print status only, do not install.
+    """
+    info = _get_install_info()
+    print(f"  version : {info['version']}")
+    print(f"  commit  : {info['commit'] or 'n/a'}")
+    print(f"  source  : {info['source']}")
+
+    if check_only:
+        return
+
+    if force:
+        print("--force specified, skipping version check")
+        update_available = True
+    else:
+        update_available, message = _check_for_update(info)
+        if not update_available:
+            print(f"Already up to date — {message}")
+            return
+        print(f"Update available: {message}")
+
+    success = _do_upgrade(info)
+    if success:
+        _run_doctor_after_upgrade()
+    else:
+        sys.exit(1)
