@@ -63,7 +63,9 @@ class TestInitRepo:
     def test_calls_git_init(self, tmp_path: Path):
         with patch("subprocess.run") as mock_run:
             init_repo(tmp_path)
-        mock_run.assert_called_once_with(["git", "init"], cwd=tmp_path, check=True)
+        mock_run.assert_called_once_with(
+            ["git", "init"], cwd=tmp_path, check=True, capture_output=True
+        )
 
     def test_skips_if_already_git_repo(self, tmp_path: Path):
         (tmp_path / ".git").mkdir()
@@ -85,7 +87,7 @@ class TestAddSubmodule:
         with patch("subprocess.run") as mock_run:
             add_submodule(tmp_path, url)
         mock_run.assert_called_once_with(
-            ["git", "submodule", "add", url], cwd=tmp_path, check=True
+            ["git", "submodule", "add", url], cwd=tmp_path, check=True, capture_output=True
         )
 
     def test_skips_if_directory_exists(self, tmp_path: Path):
@@ -116,6 +118,7 @@ class TestCheckoutSubmodules:
             ],
             cwd=tmp_path,
             check=True,
+            capture_output=True,
         )
 
 
@@ -126,6 +129,6 @@ class TestInitialCommit:
             initial_commit(tmp_path, message)
         assert mock_run.call_count == 2
         assert mock_run.call_args_list == [
-            call(["git", "add", "."], cwd=tmp_path, check=True),
-            call(["git", "commit", "-m", message], cwd=tmp_path, check=True),
+            call(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True),
+            call(["git", "commit", "-m", message], cwd=tmp_path, check=True, capture_output=True),
         ]

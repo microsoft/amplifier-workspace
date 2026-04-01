@@ -386,8 +386,8 @@ class TestCreateSession:
 
 
 class TestCreateSessionWindows:
-    def test_tool_windows_created_before_shell(self, tmp_path):
-        """Tool window new-window calls appear before the shell new-window call."""
+    def test_shell_window_created_before_tool_windows(self, tmp_path):
+        """Shell new-window call appears before tool window new-window calls (amplifier→shell→tools)."""
         workdir = tmp_path / "myproject"
         config = TmuxConfig(windows={"amplifier": "", "git": "lazygit", "shell": ""})
         with (
@@ -409,8 +409,8 @@ class TestCreateSessionWindows:
             for i, c in enumerate(calls)
             if "new-window" in c.args[0] and "git" in c.args[0]
         )
-        assert git_call_pos < shell_call_pos, (
-            "Tool window new-window should be called before shell new-window"
+        assert shell_call_pos < git_call_pos, (
+            "Shell new-window should be called before tool window new-window"
         )
 
     def test_shell_window_gets_horizontal_split(self, tmp_path):

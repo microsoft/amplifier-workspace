@@ -190,8 +190,8 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
 
     Window creation order:
     1. amplifier window (always first) — uses resume-detection rcfile
-    2. Tool windows from config.windows (in order; skips amplifier/shell keys and empty commands)
-    3. Shell window (always last) — two-pane horizontal split
+    2. Shell window (second, if configured) — two-pane horizontal split
+    3. Tool windows from config.windows (in order; skips amplifier/shell keys and empty commands)
     4. Selects amplifier window so it is focused on attach
 
     Calls _write_rcfiles(workdir, config) to generate all rcfiles before creating any windows.
@@ -218,27 +218,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
         check=True,
     )
 
-    # 2) Tool windows in config.windows order (skip reserved names, skip empty commands)
-    for window_name, command in config.windows.items():
-        if window_name in _RESERVED_WINDOW_NAMES:
-            continue
-        if not command:
-            continue
-        window_rc = rcfile_base / f"{window_name}.rc"
-        subprocess.run(
-            [
-                "tmux",
-                "new-window",
-                "-t",
-                name,
-                "-n",
-                window_name,
-                f"exec bash --rcfile {shlex.quote(str(window_rc))}",
-            ],
-            check=True,
-        )
-
-    # 3) Shell window (last, if configured) — create window then add a second pane via horizontal split
+    # 2) Shell window (second, if configured) — create window then add a second pane via horizontal split
     if "shell" in config.windows:
         subprocess.run(
             [
@@ -260,6 +240,26 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
                 "-t",
                 f"{name}:shell",
                 f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
+            ],
+            check=True,
+        )
+
+    # 3) Tool windows in config.windows order (skip reserved names, skip empty commands)
+    for window_name, command in config.windows.items():
+        if window_name in _RESERVED_WINDOW_NAMES:
+            continue
+        if not command:
+            continue
+        window_rc = rcfile_base / f"{window_name}.rc"
+        subprocess.run(
+            [
+                "tmux",
+                "new-window",
+                "-t",
+                name,
+                "-n",
+                window_name,
+                f"exec bash --rcfile {shlex.quote(str(window_rc))}",
             ],
             check=True,
         )

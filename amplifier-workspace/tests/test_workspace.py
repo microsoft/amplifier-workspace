@@ -153,6 +153,32 @@ class TestSetupWorkspace:
         setup_workspace(tmp_path, config)
         mock_git.checkout_submodules.assert_not_called()
 
+    @patch("amplifier_workspace.workspace.create_amplifier_settings")
+    @patch("amplifier_workspace.workspace.create_agents_md")
+    @patch("amplifier_workspace.workspace._git")
+    def test_agents_md_and_settings_created_before_initial_commit(
+        self, mock_git, mock_agents_md, mock_settings, tmp_path: Path
+    ):
+        """For a new repo, AGENTS.md and settings.yaml are created BEFORE initial_commit."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig(default_repos=[])
+
+        call_order: list[str] = []
+        mock_agents_md.side_effect = lambda *_: call_order.append("agents_md")
+        mock_settings.side_effect = lambda *_: call_order.append("settings")
+        mock_git.initial_commit.side_effect = lambda *_: call_order.append("initial_commit")
+
+        setup_workspace(tmp_path, config)
+
+        # agents_md and settings must both appear before initial_commit inside the new-repo block
+        first_agents = call_order.index("agents_md")
+        first_settings = call_order.index("settings")
+        first_commit = call_order.index("initial_commit")
+        assert first_agents < first_commit, "create_agents_md must be called before initial_commit"
+        assert first_settings < first_commit, (
+            "create_amplifier_settings must be called before initial_commit"
+        )
+
 
 class TestRunWorkspace:
     @patch("amplifier_workspace.workspace._launch_amplifier")

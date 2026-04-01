@@ -45,8 +45,11 @@ def is_git_repo(path: Path) -> bool:
 
 
 def _run(cmd: list[str], *, cwd: Path) -> None:
-    """Run *cmd* in *cwd*, raising on non-zero exit."""
-    subprocess.run(cmd, cwd=cwd, check=True)
+    """Run *cmd* in *cwd*, raising on non-zero exit.
+
+    Output is captured (not forwarded to the terminal) to keep the CLI quiet.
+    """
+    subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
 
 
 # ---------------------------------------------------------------------------
