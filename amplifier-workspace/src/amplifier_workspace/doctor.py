@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 from amplifier_workspace.config import CONFIG_PATH, load_config
+from amplifier_workspace.install import get_install_hint
 
 # ── ANSI colour constants ──────────────────────────────────────────────────────
 GREEN = "\033[32m"
@@ -138,9 +140,43 @@ def run_doctor() -> int:
     else:
         _print_check("agents_template", None)
 
-    # 9. tmux conditional stub (full implementation in Task 7) ────────────────
-    # TODO Task 7: implement real check when enabled
-    _print_check("tmux session", None)
+    # 9. tmux conditional checks ────────────────────────────────────────────────
+    if config.tmux.enabled:
+        # 9a. Check tmux binary
+        tmux_path = shutil.which("tmux")
+        if tmux_path:
+            try:
+                result = subprocess.run(
+                    ["tmux", "-V"], capture_output=True, text=True, timeout=5
+                )
+                tmux_ver = result.stdout.strip()
+            except Exception:
+                tmux_ver = tmux_path
+            _print_check("tmux binary", True, tmux_ver)
+        else:
+            hint = get_install_hint("tmux")
+            detail = "not found" + (f"  hint: {hint}" if hint else "")
+            _print_check("tmux binary", False, detail)
+            failures += 1
+
+        # 9b. Check each window tool
+        for window_name, command in config.tmux.windows.items():
+            if not command:
+                continue
+            base_cmd = command.split()[0]
+            tool_path = shutil.which(base_cmd)
+            if tool_path:
+                _print_check(f"tmux window '{window_name}'", True, base_cmd)
+            else:
+                hint = get_install_hint(base_cmd)
+                detail = f"{base_cmd}: not found"
+                if hint:
+                    detail += f"  hint: {hint}"
+                detail += f"  (or remove '{window_name}' from config)"
+                _print_check(f"tmux window '{window_name}'", False, detail)
+                failures += 1
+    else:
+        _print_check("tmux session", None)
 
     # 10. Summary ─────────────────────────────────────────────────────────────
     print()
