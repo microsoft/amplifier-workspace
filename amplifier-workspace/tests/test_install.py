@@ -2,6 +2,7 @@
 
 import io
 import json
+import shutil
 import stat
 import tarfile
 from unittest.mock import MagicMock, patch
@@ -234,9 +235,7 @@ class TestInstallLazygitLinux:
         mock_response.__exit__ = MagicMock(return_value=False)
 
         def fake_urlretrieve(url, dest):
-            import shutil as _shutil
-
-            _shutil.copy(str(tarball_path), dest)
+            shutil.copy(str(tarball_path), dest)
 
         with patch("urllib.request.urlopen", return_value=mock_response):
             with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):

@@ -146,12 +146,12 @@ def _install_lazygit_linux() -> tuple[bool, str]:
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tarball_path = Path(tmp_dir) / f"lazygit_{version}.tar.gz"
-            urllib.request.urlretrieve(tarball_url, str(tarball_path))
+            urllib.request.urlretrieve(tarball_url, tarball_path)
 
             # Extract lazygit binary from tarball
-            with tarfile.open(str(tarball_path)) as tf:
+            with tarfile.open(tarball_path) as tf:
                 member = tf.getmember("lazygit")
-                tf.extract(member, tmp_dir)
+                tf.extract(member, tmp_dir, filter="data")
 
             lazygit_bin = Path(tmp_dir) / "lazygit"
 
@@ -175,7 +175,7 @@ def _install_lazygit_linux() -> tuple[bool, str]:
             local_bin = Path.home() / ".local" / "bin"
             local_bin.mkdir(parents=True, exist_ok=True)
             dest = local_bin / "lazygit"
-            shutil.copy2(str(lazygit_bin), str(dest))
+            shutil.copy2(lazygit_bin, dest)
             dest.chmod(0o755)
             return (True, f"Successfully installed lazygit to {dest}")
 
