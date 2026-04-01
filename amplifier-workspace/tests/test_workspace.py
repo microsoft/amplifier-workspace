@@ -1,10 +1,16 @@
-"""Tests for workspace.py: create_agents_md and create_amplifier_settings."""
+"""Tests for workspace.py: create_agents_md, create_amplifier_settings, setup_workspace, run_workspace."""
 
 import pytest
 from pathlib import Path
+from unittest.mock import patch
 
 from amplifier_workspace.config import WorkspaceConfig
-from amplifier_workspace.workspace import create_agents_md, create_amplifier_settings
+from amplifier_workspace.workspace import (
+    create_agents_md,
+    create_amplifier_settings,
+    setup_workspace,
+    run_workspace,
+)
 
 
 class TestCreateAgentsMd:
@@ -83,3 +89,113 @@ class TestCreateAmplifierSettings:
         config = WorkspaceConfig(bundle="new-bundle")
         create_amplifier_settings(tmp_path, config)
         assert "original-bundle" in settings.read_text()
+
+
+class TestSetupWorkspace:
+    @patch("amplifier_workspace.workspace._git")
+    def test_initializes_new_repo(self, mock_git, tmp_path: Path):
+        """Calls init_repo with workdir when not already a git repo."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        mock_git.init_repo.assert_called_once_with(tmp_path)
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_adds_all_default_repos_as_submodules(self, mock_git, tmp_path: Path):
+        """Calls add_submodule once per default_repos entry."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        assert mock_git.add_submodule.call_count == len(config.default_repos)
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_checkouts_submodules_after_adding(self, mock_git, tmp_path: Path):
+        """Calls checkout_submodules with workdir after adding submodules."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        mock_git.checkout_submodules.assert_called_once_with(tmp_path)
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_creates_initial_commit(self, mock_git, tmp_path: Path):
+        """Calls initial_commit with a message containing 'workspace'."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        mock_git.initial_commit.assert_called_once()
+        args = mock_git.initial_commit.call_args[0]
+        assert "workspace" in args[1].lower()
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_skips_git_init_for_existing_repo(self, mock_git, tmp_path: Path):
+        """Does not call init_repo, add_submodule, or checkout_submodules for existing repo."""
+        mock_git.is_git_repo.return_value = True
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        mock_git.init_repo.assert_not_called()
+        mock_git.add_submodule.assert_not_called()
+        mock_git.checkout_submodules.assert_not_called()
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_creates_agents_md_for_existing_repo(self, mock_git, tmp_path: Path):
+        """Always creates AGENTS.md even when repo already exists."""
+        mock_git.is_git_repo.return_value = True
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        assert (tmp_path / "AGENTS.md").exists()
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_skips_submodule_checkout_when_no_repos(self, mock_git, tmp_path: Path):
+        """Does not call checkout_submodules when default_repos is empty."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig(default_repos=[])
+        setup_workspace(tmp_path, config)
+        mock_git.checkout_submodules.assert_not_called()
+
+
+class TestRunWorkspace:
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    def test_normal_path_calls_setup_then_launch(
+        self, mock_setup, mock_launch, tmp_path: Path
+    ):
+        """Default run calls setup_workspace then _launch_amplifier."""
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config)
+        mock_setup.assert_called_once()
+        mock_launch.assert_called_once()
+
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    def test_destroy_removes_directory_skips_setup(
+        self, mock_rmtree, mock_setup, tmp_path: Path
+    ):
+        """destroy=True calls shutil.rmtree and does NOT call setup_workspace."""
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, destroy=True)
+        mock_rmtree.assert_called_once_with(tmp_path)
+        mock_setup.assert_not_called()
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    def test_fresh_removes_then_recreates(
+        self, mock_setup, mock_launch, tmp_path: Path
+    ):
+        """fresh=True removes existing directory then calls setup and launch."""
+        (tmp_path / "existing_file.txt").write_text("content")
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, fresh=True)
+        mock_setup.assert_called_once()
+        mock_launch.assert_called_once()
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    def test_destroy_noop_when_dir_missing(
+        self, mock_setup, mock_launch, tmp_path: Path
+    ):
+        """destroy=True on a missing directory does not raise and skips setup/launch."""
+        nonexistent = tmp_path / "nonexistent"
+        config = WorkspaceConfig()
+        run_workspace(nonexistent, config, destroy=True)
+        mock_setup.assert_not_called()
+        mock_launch.assert_not_called()
