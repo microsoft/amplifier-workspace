@@ -1,10 +1,12 @@
-"""Tests for tmux.py: session_name_from_path, session_exists, and kill_session."""
+"""Tests for tmux.py: session_name_from_path, session_exists, kill_session, and rcfile helpers."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from amplifier_workspace.tmux import (
     SESSION_NAME_MAX,
+    _main_rcfile_content,
+    _shell_rcfile_content,
     kill_session,
     session_exists,
     session_name_from_path,
@@ -110,3 +112,60 @@ class TestKillSession:
         cmd = call_args.args[0]  # first positional argument is the command list
         assert "my-named-session" in cmd
         assert "kill-session" in cmd
+
+
+class TestMainRcfileContent:
+    def test_sources_bashrc(self):
+        """The main rcfile sources ~/.bashrc."""
+        result = _main_rcfile_content(Path("/some/path"))
+        assert "source ~/.bashrc" in result
+
+    def test_cds_to_workdir(self):
+        """The main rcfile cds to the given workdir."""
+        result = _main_rcfile_content(Path("/some/path"))
+        assert "cd /some/path" in result
+
+    def test_has_sleep_05(self):
+        """The main rcfile includes sleep 0.5 for terminal settling."""
+        result = _main_rcfile_content(Path("/some/path"))
+        assert "sleep 0.5" in result
+
+    def test_checks_amplifier_session_list(self):
+        """The main rcfile checks for existing Amplifier sessions via 'amplifier session list'."""
+        result = _main_rcfile_content(Path("/some/path"))
+        assert "amplifier session list" in result
+
+    def test_exec_amplifier_resume_when_sessions_found(self):
+        """The main rcfile runs 'exec amplifier resume' when sessions are found."""
+        result = _main_rcfile_content(Path("/some/path"))
+        lines = result.splitlines()
+        assert any(line.strip() == "exec amplifier resume" for line in lines)
+
+    def test_exec_amplifier_when_no_sessions(self):
+        """The main rcfile runs bare 'exec amplifier' in the else branch."""
+        result = _main_rcfile_content(Path("/some/path"))
+        lines = result.splitlines()
+        assert any(line.strip() == "exec amplifier" for line in lines)
+
+    def test_workdir_with_spaces_is_quoted(self):
+        """Workdir paths containing spaces are safely quoted via shlex.quote."""
+        result = _main_rcfile_content(Path("/path/with spaces/project"))
+        # shlex.quote wraps in single quotes when the path contains spaces
+        assert "'/path/with spaces/project'" in result
+
+
+class TestShellRcfileContent:
+    def test_sources_bashrc(self):
+        """The shell rcfile sources ~/.bashrc."""
+        result = _shell_rcfile_content(Path("/some/path"))
+        assert "source ~/.bashrc" in result
+
+    def test_cds_to_workdir(self):
+        """The shell rcfile cds to the given workdir."""
+        result = _shell_rcfile_content(Path("/some/path"))
+        assert "cd /some/path" in result
+
+    def test_no_exec_command(self):
+        """The shell rcfile does not contain any exec command (drops to interactive bash)."""
+        result = _shell_rcfile_content(Path("/some/path"))
+        assert "exec " not in result
