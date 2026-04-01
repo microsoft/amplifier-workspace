@@ -51,9 +51,22 @@ def run_wizard() -> None:
         bundle = _prompt("Amplifier bundle name", default=DEFAULT_BUNDLE)
 
         # ------------------------------------------------------------------
-        # Steps 3 & 4 — stubbed for now
+        # Step 3 — AGENTS.md template
         # ------------------------------------------------------------------
-        agents_template: str = ""
+        print("\nAGENTS.md template:")
+        print("  [1] Built-in (default)")
+        print("  [2] Custom file path")
+        template_choice = _prompt("Choice", default="1")
+        if template_choice == "2":
+            agents_template: str = _prompt("Path to custom AGENTS.md template")
+        else:
+            agents_template = ""
+
+        # ------------------------------------------------------------------
+        # Step 4 — Session manager stub
+        # ------------------------------------------------------------------
+        print("\ntmux session manager setup is available in Phase 3.")
+        print("Run amplifier-workspace setup again after upgrading to configure it.")
         tmux_enabled: bool = False
 
         # ------------------------------------------------------------------
