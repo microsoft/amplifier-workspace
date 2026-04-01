@@ -11,6 +11,7 @@ from amplifier_workspace.tmux import (
     _shell_rcfile_content,
     _window_rcfile_content,
     _write_rcfiles,
+    create_session,
     kill_session,
     session_exists,
     session_name_from_path,
@@ -269,3 +270,86 @@ class TestWriteRcfiles:
             assert file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH), (
                 f"{rcfile.name} is not executable"
             )
+
+
+class TestCreateSession:
+    def test_creates_session_with_amplifier_window(self, tmp_path):
+        """Creates new session with -d, -s, and -n amplifier flags."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        new_session_call = next(c for c in calls if "new-session" in c.args[0])
+        cmd = new_session_call.args[0]
+        assert "-d" in cmd
+        assert "-s" in cmd
+        assert "-n" in cmd
+        assert "amplifier" in cmd
+
+    def test_session_name_derived_from_workdir(self, tmp_path):
+        """Session name is derived from workdir via session_name_from_path."""
+        workdir = tmp_path / "my-project"
+        config = TmuxConfig(windows={"amplifier": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        new_session_call = next(c for c in calls if "new-session" in c.args[0])
+        cmd = new_session_call.args[0]
+        # -s is followed by the session name derived from workdir basename
+        s_index = cmd.index("-s")
+        assert cmd[s_index + 1] == "my-project"
+
+    def test_uses_amplifier_rcfile_for_main_window(self, tmp_path):
+        """Amplifier window shell command contains amplifier.rc and --rcfile."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        new_session_call = next(c for c in calls if "new-session" in c.args[0])
+        cmd = new_session_call.args[0]
+        # The shell command is the last element (exec bash --rcfile '...')
+        shell_cmd = cmd[-1]
+        assert "amplifier.rc" in shell_cmd
+        assert "--rcfile" in shell_cmd
+
+    def test_selects_amplifier_window_at_end(self, tmp_path):
+        """Last subprocess call is select-window -t <name>:amplifier."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        last_cmd = calls[-1].args[0]
+        assert "select-window" in last_cmd
+        # Target must include <name>:amplifier
+        assert any("amplifier" in arg and ":" in arg for arg in last_cmd)
+
+    def test_calls_write_rcfiles_with_correct_args(self, tmp_path):
+        """Calls _write_rcfiles(workdir, config) to generate rcfiles first."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run"),
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        mock_rcfiles.assert_called_once_with(workdir, config)

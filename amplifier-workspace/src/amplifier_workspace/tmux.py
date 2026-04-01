@@ -19,6 +19,7 @@ __all__ = [
     "kill_session",
     "_window_rcfile_content",
     "_write_rcfiles",
+    "create_session",
 ]
 
 SESSION_NAME_MAX: int = 32
@@ -156,3 +157,88 @@ def _write_rcfiles(
         window_rc.chmod(0o755)
 
     return rcfile_base
+
+
+def create_session(workdir: Path, config: "TmuxConfig") -> None:
+    """Create a new tmux session for the given workspace directory.
+
+    Window creation order:
+    1. amplifier window (always first) — uses resume-detection rcfile
+    2. Tool windows from config.windows (in order; skips amplifier/shell keys and empty commands)
+    3. Shell window (always last) — two-pane horizontal split
+    4. Selects amplifier window so it is focused on attach
+
+    Calls _write_rcfiles(workdir, config) to generate all rcfiles before creating any windows.
+    Session name is derived via session_name_from_path(workdir).
+    """
+    name = session_name_from_path(workdir)
+    rcfile_base = _write_rcfiles(workdir, config)
+
+    amplifier_rc = rcfile_base / "amplifier.rc"
+    shell_rc = rcfile_base / "shell.rc"
+
+    # 1) Create session with amplifier window as the first window
+    subprocess.run(
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-n",
+            "amplifier",
+            f"exec bash --rcfile '{amplifier_rc}'",
+        ],
+        check=True,
+    )
+
+    # 2) Tool windows in config.windows order (skip amplifier/shell, skip empty commands)
+    for window_name, command in config.windows.items():
+        if window_name in ("amplifier", "shell"):
+            continue
+        if not command:
+            continue
+        window_rc = rcfile_base / f"{window_name}.rc"
+        subprocess.run(
+            [
+                "tmux",
+                "new-window",
+                "-t",
+                name,
+                "-n",
+                window_name,
+                f"exec bash --rcfile '{window_rc}'",
+            ],
+            check=True,
+        )
+
+    # 3) Shell window (always last) — create window then add a second pane via horizontal split
+    subprocess.run(
+        [
+            "tmux",
+            "new-window",
+            "-t",
+            name,
+            "-n",
+            "shell",
+            f"exec bash --rcfile '{shell_rc}'",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "tmux",
+            "split-window",
+            "-h",
+            "-t",
+            f"{name}:shell",
+            f"exec bash --rcfile '{shell_rc}'",
+        ],
+        check=True,
+    )
+
+    # 4) Select amplifier window so it is focused on attach
+    subprocess.run(
+        ["tmux", "select-window", "-t", f"{name}:amplifier"],
+        check=True,
+    )
