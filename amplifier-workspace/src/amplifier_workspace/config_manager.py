@@ -60,6 +60,15 @@ def read_config_raw(path: Path | None = None) -> dict:
         return tomllib.load(fh)
 
 
+def write_config(data: dict) -> None:
+    """Write *data* dict to the default config file location.
+
+    Convenience wrapper around ``write_config_raw`` for callers (e.g. the
+    wizard) that always write to ``CONFIG_PATH``.
+    """
+    write_config_raw(data)
+
+
 def write_config_raw(data: dict, path: Path | None = None) -> None:
     """Write *data* to the TOML config file.
 

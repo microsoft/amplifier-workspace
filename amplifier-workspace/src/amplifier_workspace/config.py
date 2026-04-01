@@ -19,6 +19,10 @@ _DEFAULT_REPOS: list[str] = [
     "https://github.com/microsoft/amplifier-foundation.git",
 ]
 
+# Public constants for use by wizard and other callers
+DEFAULT_REPOS: list[str] = list(_DEFAULT_REPOS)
+DEFAULT_BUNDLE: str = "amplifier-dev"
+
 _DEFAULT_WINDOWS: dict[str, str] = {
     "amplifier": "",
     "shell": "",
