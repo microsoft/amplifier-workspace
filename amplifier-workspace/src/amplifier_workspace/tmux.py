@@ -17,6 +17,8 @@ __all__ = [
     "session_name_from_path",
     "session_exists",
     "kill_session",
+    "_main_rcfile_content",
+    "_shell_rcfile_content",
     "_window_rcfile_content",
     "_write_rcfiles",
     "create_session",
@@ -187,7 +189,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
             name,
             "-n",
             "amplifier",
-            f"exec bash --rcfile '{amplifier_rc}'",
+            f"exec bash --rcfile {shlex.quote(str(amplifier_rc))}",
         ],
         check=True,
     )
@@ -207,7 +209,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
                 name,
                 "-n",
                 window_name,
-                f"exec bash --rcfile '{window_rc}'",
+                f"exec bash --rcfile {shlex.quote(str(window_rc))}",
             ],
             check=True,
         )
@@ -221,7 +223,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
             name,
             "-n",
             "shell",
-            f"exec bash --rcfile '{shell_rc}'",
+            f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
         ],
         check=True,
     )
@@ -232,7 +234,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
             "-h",
             "-t",
             f"{name}:shell",
-            f"exec bash --rcfile '{shell_rc}'",
+            f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
         ],
         check=True,
     )
