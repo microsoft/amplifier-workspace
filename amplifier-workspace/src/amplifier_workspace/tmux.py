@@ -67,4 +67,5 @@ def kill_session(name: str) -> None:
     does not exist.
     """
     if session_exists(name):
+        # ignore return code — session may have died between exists-check and kill
         subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True)

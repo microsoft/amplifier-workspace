@@ -76,7 +76,7 @@ class TestSessionExists:
         with patch("subprocess.run", return_value=mock_result) as mock_run:
             session_exists("exact-name-123")
         call_args = mock_run.call_args
-        cmd = call_args[0][0]  # first positional argument is the command list
+        cmd = call_args.args[0]  # first positional argument is the command list
         assert "exact-name-123" in cmd
 
 
@@ -107,6 +107,6 @@ class TestKillSession:
         ):
             kill_session("my-named-session")
         call_args = mock_run.call_args
-        cmd = call_args[0][0]  # first positional argument is the command list
+        cmd = call_args.args[0]  # first positional argument is the command list
         assert "my-named-session" in cmd
         assert "kill-session" in cmd
