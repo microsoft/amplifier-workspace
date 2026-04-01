@@ -143,11 +143,8 @@ def run_doctor() -> int:
         _print_check("agents_template", None)
 
     # 9. tmux conditional stub (full implementation in Task 7) ────────────────
-    if not config.tmux.enabled:
-        _print_check("tmux session", None)
-    else:
-        # Full tmux checks are implemented in Task 7
-        _print_check("tmux session", None)
+    # TODO Task 7: implement real check when enabled
+    _print_check("tmux session", None)
 
     # 10. Summary ─────────────────────────────────────────────────────────────
     print()

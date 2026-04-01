@@ -3,8 +3,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from amplifier_workspace.doctor import (
     _print_check,
     run_doctor,
@@ -21,8 +19,10 @@ _SAMPLE_INSTALL_INFO = {
 
 def _make_which(available: set[str]):
     """Return a shutil.which side_effect that returns a path only for known commands."""
+
     def which(cmd):
         return f"/usr/bin/{cmd}" if cmd in available else None
+
     return which
 
 
@@ -32,14 +32,22 @@ class TestPrintCheck:
         _print_check("Python version", True, "3.11.0")
         captured = capsys.readouterr()
         # Should contain ✓ or green ANSI escape
-        assert "✓" in captured.out or "\033[32m" in captured.out or "\x1b[32m" in captured.out
+        assert (
+            "✓" in captured.out
+            or "\033[32m" in captured.out
+            or "\x1b[32m" in captured.out
+        )
 
     def test_fail_contains_x_mark(self, capsys):
         """_print_check with passed=False outputs the failure symbol (✗) or red ANSI."""
         _print_check("git in PATH", False, "not found")
         captured = capsys.readouterr()
         # Should contain ✗ or red ANSI escape
-        assert "✗" in captured.out or "\033[31m" in captured.out or "\x1b[31m" in captured.out
+        assert (
+            "✗" in captured.out
+            or "\033[31m" in captured.out
+            or "\x1b[31m" in captured.out
+        )
 
     def test_none_shows_skipped(self, capsys):
         """_print_check with passed=None outputs 'skipped'."""
