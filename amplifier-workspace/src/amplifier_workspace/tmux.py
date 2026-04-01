@@ -17,14 +17,11 @@ __all__ = [
     "session_name_from_path",
     "session_exists",
     "kill_session",
-    "_main_rcfile_content",
-    "_shell_rcfile_content",
-    "_window_rcfile_content",
-    "_write_rcfiles",
     "create_session",
 ]
 
 SESSION_NAME_MAX: int = 32
+_RESERVED_WINDOW_NAMES: frozenset[str] = frozenset({"amplifier", "shell"})
 
 
 def session_name_from_path(workdir: Path) -> str:
@@ -150,7 +147,7 @@ def _write_rcfiles(
     shell_rc.chmod(0o755)
 
     for window_name, command in config.windows.items():
-        if window_name in ("amplifier", "shell"):
+        if window_name in _RESERVED_WINDOW_NAMES:
             continue
         if not command:
             continue
@@ -194,9 +191,9 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
         check=True,
     )
 
-    # 2) Tool windows in config.windows order (skip amplifier/shell, skip empty commands)
+    # 2) Tool windows in config.windows order (skip reserved names, skip empty commands)
     for window_name, command in config.windows.items():
-        if window_name in ("amplifier", "shell"):
+        if window_name in _RESERVED_WINDOW_NAMES:
             continue
         if not command:
             continue

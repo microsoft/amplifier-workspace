@@ -353,3 +353,31 @@ class TestCreateSession:
             mock_rcfiles.return_value = Path("/tmp/rcfiles")
             create_session(workdir, config)
         mock_rcfiles.assert_called_once_with(workdir, config)
+
+    def test_creates_tool_windows_in_order(self, tmp_path):
+        """Tool windows from config.windows are created via new-window with correct name and rcfile."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(
+            windows={"amplifier": "", "lazygit": "lazygit", "shell": ""}
+        )
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        # Find the new-window call for the lazygit tool window
+        tool_calls = [
+            c for c in calls if "new-window" in c.args[0] and "lazygit" in c.args[0]
+        ]
+        assert len(tool_calls) == 1, "Expected exactly one new-window call for lazygit"
+        cmd = tool_calls[0].args[0]
+        # Must have -n lazygit
+        assert "-n" in cmd
+        n_index = cmd.index("-n")
+        assert cmd[n_index + 1] == "lazygit"
+        # Shell command must reference lazygit.rc
+        shell_cmd = cmd[-1]
+        assert "lazygit.rc" in shell_cmd
+        assert "--rcfile" in shell_cmd
