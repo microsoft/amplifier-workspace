@@ -151,7 +151,7 @@ def run_doctor() -> int:
                 )
                 tmux_ver = result.stdout.strip()
             except Exception:
-                tmux_ver = tmux_path
+                tmux_ver = f"{tmux_path} (version unavailable)"
             _print_check("tmux binary", True, tmux_ver)
         else:
             hint = get_install_hint("tmux")

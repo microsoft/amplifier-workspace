@@ -85,9 +85,6 @@ class TestRunDoctor:
         mock_config = MagicMock()
         mock_config.default_repos = ["https://github.com/example/repo.git"]
         mock_config.agents_template = agents_template
-        # TODO Task 7: tmux.enabled is not yet read by run_doctor; Task 7 will add
-        # the conditional check so that the tmux row shows active or skipped based
-        # on this flag. For now, run_doctor always prints "tmux session (skipped)".
         mock_config.tmux.enabled = False
 
         available = set()
@@ -289,6 +286,8 @@ class TestTmuxChecks:
             )
 
         assert "tmux" in captured.out.lower()
+        assert "3.3a" in captured.out
+        assert exit_code == 0
 
     def test_doctor_tmux_enabled_missing_tool_fails(self, capsys):
         """When tmux.windows has lazygit but it's missing, run_doctor fails."""
