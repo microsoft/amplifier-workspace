@@ -1,12 +1,16 @@
 """Tests for tmux.py: session_name_from_path, session_exists, kill_session, and rcfile helpers."""
 
+import stat
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from amplifier_workspace.config import TmuxConfig
 from amplifier_workspace.tmux import (
     SESSION_NAME_MAX,
     _main_rcfile_content,
     _shell_rcfile_content,
+    _window_rcfile_content,
+    _write_rcfiles,
     kill_session,
     session_exists,
     session_name_from_path,
@@ -175,3 +179,93 @@ class TestShellRcfileContent:
         """The shell rcfile does not contain any exec command (drops to interactive bash)."""
         result = _shell_rcfile_content(Path("/some/path"))
         assert "exec " not in result
+
+
+class TestWindowRcfileContent:
+    def test_sources_bashrc(self):
+        """The window rcfile sources ~/.bashrc."""
+        result = _window_rcfile_content(Path("/some/path"), "lazygit")
+        assert "source ~/.bashrc" in result
+
+    def test_cds_to_workdir(self):
+        """The window rcfile cds to the given workdir."""
+        result = _window_rcfile_content(Path("/some/path"), "lazygit")
+        assert "cd /some/path" in result
+
+    def test_has_sleep_03(self):
+        """The window rcfile includes sleep 0.3 for terminal settling."""
+        result = _window_rcfile_content(Path("/some/path"), "lazygit")
+        assert "sleep 0.3" in result
+
+    def test_execs_command(self):
+        """The window rcfile execs the given command."""
+        result = _window_rcfile_content(Path("/some/path"), "lazygit")
+        assert "exec lazygit" in result
+
+    def test_command_with_args(self):
+        """The window rcfile execs a command with arguments."""
+        result = _window_rcfile_content(Path("/some/path"), "yazi /some/arg")
+        assert "exec yazi /some/arg" in result
+
+
+class TestWriteRcfiles:
+    def test_creates_rcfile_dir(self, tmp_path):
+        """_write_rcfiles creates the rcfile directory."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig()
+        result = _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        assert rcfile_base.exists()
+        assert result == rcfile_base
+
+    def test_creates_amplifier_rc(self, tmp_path):
+        """_write_rcfiles always creates amplifier.rc."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig()
+        _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        assert (rcfile_base / "amplifier.rc").exists()
+
+    def test_creates_shell_rc(self, tmp_path):
+        """_write_rcfiles always creates shell.rc."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig()
+        _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        assert (rcfile_base / "shell.rc").exists()
+
+    def test_creates_tool_window_rcfile(self, tmp_path):
+        """_write_rcfiles creates a {window_name}.rc for additional windows with commands."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig(
+            windows={"amplifier": "", "shell": "", "lazygit": "lazygit"}
+        )
+        _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        assert (rcfile_base / "lazygit.rc").exists()
+
+    def test_tool_rcfile_has_correct_command(self, tmp_path):
+        """The tool window rcfile uses _window_rcfile_content with the correct command."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig(
+            windows={"amplifier": "", "shell": "", "lazygit": "lazygit"}
+        )
+        _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        content = (rcfile_base / "lazygit.rc").read_text()
+        assert "exec lazygit" in content
+
+    def test_skips_windows_with_empty_command(self, tmp_path):
+        """_write_rcfiles skips creating rcfiles for windows with empty commands."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig(windows={"amplifier": "", "shell": "", "nocommand": ""})
+        _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        assert not (rcfile_base / "nocommand.rc").exists()
+
+    def test_rcfiles_are_executable(self, tmp_path):
+        """All written rcfiles have at least one execute bit set."""
+        rcfile_base = tmp_path / "rcfiles"
+        config = TmuxConfig(
+            windows={"amplifier": "", "shell": "", "lazygit": "lazygit"}
+        )
+        _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
+        for rcfile in rcfile_base.iterdir():
+            file_stat = rcfile.stat()
+            assert file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH), (
+                f"{rcfile.name} is not executable"
+            )

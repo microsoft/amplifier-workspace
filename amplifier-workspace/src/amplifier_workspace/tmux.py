@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-import os  # noqa: F401  # available for future subprocess/path helpers
+import os
 import re
 import shlex
 import subprocess
-import tempfile  # noqa: F401  # available for future temp-file operations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from amplifier_workspace.config import TmuxConfig  # noqa: F401  # used in type hints
+    from amplifier_workspace.config import TmuxConfig
 
 __all__ = [
     "SESSION_NAME_MAX",
     "session_name_from_path",
     "session_exists",
     "kill_session",
+    "_window_rcfile_content",
+    "_write_rcfiles",
 ]
 
 SESSION_NAME_MAX: int = 32
@@ -101,3 +102,57 @@ def _shell_rcfile_content(workdir: Path) -> str:
     """
     quoted_workdir = shlex.quote(str(workdir))
     return f"source ~/.bashrc\ncd {quoted_workdir}\n"
+
+
+def _window_rcfile_content(workdir: Path, command: str) -> str:
+    """Generate rcfile content for a tool window (lazygit, yazi, etc.).
+
+    Sources ~/.bashrc, cds to workdir, sleeps 0.3 for terminal settling,
+    then execs the given command.
+    """
+    quoted_workdir = shlex.quote(str(workdir))
+    return f"""\
+source ~/.bashrc
+cd {quoted_workdir}
+sleep 0.3
+exec {command}
+"""
+
+
+def _write_rcfiles(
+    workdir: Path,
+    config: "TmuxConfig",
+    *,
+    rcfile_base: Path | None = None,
+) -> Path:
+    """Write rcfiles for all configured windows and return the rcfile directory.
+
+    If rcfile_base is None, defaults to /tmp/amplifier-workspace-rcfiles-{pid}.
+    Always writes amplifier.rc and shell.rc. For each additional window in
+    config.windows (skipping 'amplifier', 'shell', and empty commands), writes
+    {window_name}.rc using _window_rcfile_content.
+    All rcfiles are chmod 0o755.
+    """
+    if rcfile_base is None:
+        rcfile_base = Path(f"/tmp/amplifier-workspace-rcfiles-{os.getpid()}")
+
+    rcfile_base.mkdir(parents=True, exist_ok=True)
+
+    amplifier_rc = rcfile_base / "amplifier.rc"
+    amplifier_rc.write_text(_main_rcfile_content(workdir))
+    amplifier_rc.chmod(0o755)
+
+    shell_rc = rcfile_base / "shell.rc"
+    shell_rc.write_text(_shell_rcfile_content(workdir))
+    shell_rc.chmod(0o755)
+
+    for window_name, command in config.windows.items():
+        if window_name in ("amplifier", "shell"):
+            continue
+        if not command:
+            continue
+        window_rc = rcfile_base / f"{window_name}.rc"
+        window_rc.write_text(_window_rcfile_content(workdir, command))
+        window_rc.chmod(0o755)
+
+    return rcfile_base
