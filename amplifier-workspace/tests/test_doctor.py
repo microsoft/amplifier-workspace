@@ -505,3 +505,34 @@ class TestDoctorTmuxChecks:
             )
 
         assert exit_code == 0
+
+    def test_get_version_helper_exists(self):
+        """_get_version helper function must exist and be callable in doctor module."""
+        import amplifier_workspace.doctor as doctor_mod
+
+        assert hasattr(doctor_mod, "_get_version"), (
+            "_get_version helper not found in doctor.py"
+        )
+        assert callable(doctor_mod._get_version), "_get_version must be callable"
+
+    def test_window_count_reported(self, capsys):
+        """When tmux is enabled with multiple windows, output includes a count."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {"lazygit": "lazygit", "yazi": "yazi"}
+
+        which_fn = _make_which({"git", "amplifier", "tmux", "lazygit", "yazi"})
+
+        with patch(
+            "amplifier_workspace.doctor.subprocess.run",
+            return_value=MagicMock(stdout="tmux 3.3a\n"),
+        ):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        assert exit_code == 0
+        # Output must report window count (e.g. "2 window(s) configured")
+        assert "2 window" in captured.out

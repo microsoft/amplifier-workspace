@@ -40,6 +40,15 @@ def _check_for_update_doctor(info: dict) -> tuple[bool, str]:
     return _check_for_update(info)
 
 
+def _get_version(cmd: str, flag: str) -> str:
+    """Return version string from running ``cmd flag``, or empty string on failure."""
+    try:
+        result = subprocess.run([cmd, flag], capture_output=True, text=True, timeout=5)
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
 # ── Formatted output helper ───────────────────────────────────────────────────
 
 
@@ -145,13 +154,9 @@ def run_doctor() -> int:
         # 9a. Check tmux binary
         tmux_path = shutil.which("tmux")
         if tmux_path:
-            try:
-                result = subprocess.run(
-                    ["tmux", "-V"], capture_output=True, text=True, timeout=5
-                )
-                tmux_ver = result.stdout.strip()
-            except Exception:
-                tmux_ver = f"{tmux_path} (version unavailable)"
+            tmux_ver = (
+                _get_version("tmux", "-V") or f"{tmux_path} (version unavailable)"
+            )
             _print_check("tmux binary", True, tmux_ver)
         else:
             hint = get_install_hint("tmux")
@@ -159,7 +164,9 @@ def run_doctor() -> int:
             _print_check("tmux binary", False, detail)
             failures += 1
 
-        # 9b. Check each window tool
+        # 9b. Report window count and check each window tool
+        window_count = len(config.tmux.windows)
+        print(f"  {window_count} window(s) configured")
         for window_name, command in config.tmux.windows.items():
             if not command:
                 continue
