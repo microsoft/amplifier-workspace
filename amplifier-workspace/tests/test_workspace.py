@@ -156,10 +156,19 @@ class TestSetupWorkspace:
 class TestRunWorkspace:
     @patch("amplifier_workspace.workspace._launch_amplifier")
     @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
     def test_normal_path_calls_setup_then_launch(
-        self, mock_setup, mock_launch, tmp_path: Path
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
     ):
         """Default run calls setup_workspace then _launch_amplifier."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
         config = WorkspaceConfig()
         run_workspace(tmp_path, config)
         mock_setup.assert_called_once()
@@ -167,10 +176,19 @@ class TestRunWorkspace:
 
     @patch("amplifier_workspace.workspace.setup_workspace")
     @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
     def test_destroy_removes_directory_skips_setup(
-        self, mock_rmtree, mock_setup, tmp_path: Path
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_rmtree,
+        mock_setup,
+        tmp_path: Path,
     ):
         """destroy=True calls shutil.rmtree and does NOT call setup_workspace."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
         config = WorkspaceConfig()
         run_workspace(tmp_path, config, destroy=True)
         mock_rmtree.assert_called_once_with(tmp_path)
@@ -178,10 +196,19 @@ class TestRunWorkspace:
 
     @patch("amplifier_workspace.workspace._launch_amplifier")
     @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
     def test_fresh_removes_then_recreates(
-        self, mock_setup, mock_launch, tmp_path: Path
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
     ):
         """fresh=True removes existing directory then calls setup and launch."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
         (tmp_path / "existing_file.txt").write_text("content")
         config = WorkspaceConfig()
         run_workspace(tmp_path, config, fresh=True)
@@ -190,12 +217,64 @@ class TestRunWorkspace:
 
     @patch("amplifier_workspace.workspace._launch_amplifier")
     @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
     def test_destroy_noop_when_dir_missing(
-        self, mock_setup, mock_launch, tmp_path: Path
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
     ):
         """destroy=True on a missing directory does not raise and skips setup/launch."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
         nonexistent = tmp_path / "nonexistent"
         config = WorkspaceConfig()
         run_workspace(nonexistent, config, destroy=True)
         mock_setup.assert_not_called()
         mock_launch.assert_not_called()
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.wizard.run_wizard")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_workspace_triggers_wizard_when_no_config(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_run_wizard,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
+    ):
+        """Runs the first-run wizard when CONFIG_PATH does not exist."""
+        mock_config_path.exists.return_value = False
+        mock_load_config.return_value = WorkspaceConfig()
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config)
+        mock_run_wizard.assert_called_once()
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace._git")
+    @patch("amplifier_workspace.wizard.run_wizard")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_workspace_skips_wizard_when_config_exists(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_run_wizard,
+        mock_git,
+        mock_launch,
+        tmp_path: Path,
+    ):
+        """Does not run wizard when CONFIG_PATH already exists."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config)
+        mock_run_wizard.assert_not_called()

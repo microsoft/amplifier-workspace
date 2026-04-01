@@ -170,6 +170,16 @@ def run_workspace(
     Default:
         Set up the workspace and launch Amplifier.
     """
+    # First-run wizard trigger — lazy imports avoid circular dependency through wizard
+    from amplifier_workspace.config_manager import CONFIG_PATH  # noqa: PLC0415
+    from amplifier_workspace.config import load_config  # noqa: PLC0415
+    from amplifier_workspace.wizard import run_wizard  # noqa: PLC0415
+
+    if not CONFIG_PATH.exists():
+        run_wizard()
+
+    config = load_config()  # re-load config (wizard may have just written it)
+
     if destroy and not fresh:
         if workdir.exists():
             shutil.rmtree(workdir)
