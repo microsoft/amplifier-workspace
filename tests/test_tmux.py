@@ -123,9 +123,9 @@ class TestKillSession:
 
 class TestMainRcfileContent:
     def test_sources_bashrc(self):
-        """The main rcfile sources ~/.bashrc."""
+        """The main rcfile sources ~/.bashrc with stderr suppressed."""
         result = _main_rcfile_content(Path("/some/path"))
-        assert "source ~/.bashrc" in result
+        assert "source ~/.bashrc 2>/dev/null" in result
 
     def test_cds_to_workdir(self):
         """The main rcfile cds to the given workdir."""
@@ -138,27 +138,44 @@ class TestMainRcfileContent:
         assert "sleep 0.5" in result
 
     def test_checks_amplifier_session_list(self):
-        """The main rcfile checks for existing Amplifier sessions via 'amplifier session list'."""
+        """The main rcfile captures 'amplifier session list' output to a variable."""
         result = _main_rcfile_content(Path("/some/path"))
         assert "amplifier session list" in result
-        # The command must appear inside an 'if' conditional block, not as a standalone call
+        # Output is captured to a variable, not piped directly into 'if'
         lines = result.splitlines()
         assert any(
-            line.startswith("if ") and "amplifier session list" in line
+            "session_output=" in line and "amplifier session list" in line
             for line in lines
         )
 
-    def test_exec_amplifier_resume_when_sessions_found(self):
-        """The main rcfile runs 'exec amplifier resume' when sessions are found."""
+    def test_amplifier_resume_when_sessions_found(self):
+        """The main rcfile runs 'amplifier resume' (no exec) when a Session ID is found."""
         result = _main_rcfile_content(Path("/some/path"))
         lines = result.splitlines()
-        assert any(line.strip() == "exec amplifier resume" for line in lines)
+        assert any(line.strip() == "amplifier resume" for line in lines)
 
-    def test_exec_amplifier_when_no_sessions(self):
-        """The main rcfile runs bare 'exec amplifier' in the else branch."""
+    def test_amplifier_when_no_sessions(self):
+        """The main rcfile runs bare 'amplifier' (no exec) in the no-sessions / fallback branches."""
         result = _main_rcfile_content(Path("/some/path"))
         lines = result.splitlines()
-        assert any(line.strip() == "exec amplifier" for line in lines)
+        assert any(line.strip() == "amplifier" for line in lines)
+
+    def test_no_exec_in_amplifier_commands(self):
+        """The main rcfile does NOT use 'exec amplifier' — bash must stay alive after amplifier exits."""
+        result = _main_rcfile_content(Path("/some/path"))
+        assert "exec amplifier" not in result
+
+    def test_no_exec_bash_at_end(self):
+        """The main rcfile does NOT end with 'exec bash' — matches the proven working pattern.
+
+        The amplifier-cli-tools reference implementation does not use 'exec bash' at the
+        end of the rcfile.  The window stays open because bash is still alive (no exec
+        before amplifier), and when the rcfile finishes, bash drops to an interactive prompt.
+        """
+        result = _main_rcfile_content(Path("/some/path"))
+        assert not result.rstrip("\n").endswith("exec bash"), (
+            "rcfile must NOT end with 'exec bash' — it breaks the window-stays-open behavior"
+        )
 
     def test_workdir_with_spaces_is_quoted(self):
         """Workdir paths containing spaces are safely quoted via shlex.quote."""
@@ -169,9 +186,9 @@ class TestMainRcfileContent:
 
 class TestShellRcfileContent:
     def test_sources_bashrc(self):
-        """The shell rcfile sources ~/.bashrc."""
+        """The shell rcfile sources ~/.bashrc with stderr suppressed."""
         result = _shell_rcfile_content(Path("/some/path"))
-        assert "source ~/.bashrc" in result
+        assert "source ~/.bashrc 2>/dev/null" in result
 
     def test_cds_to_workdir(self):
         """The shell rcfile cds to the given workdir."""
@@ -186,29 +203,31 @@ class TestShellRcfileContent:
 
 class TestWindowRcfileContent:
     def test_sources_bashrc(self):
-        """The window rcfile sources ~/.bashrc."""
+        """The window rcfile sources ~/.bashrc with stderr suppressed."""
         result = _window_rcfile_content(Path("/some/path"), "lazygit")
-        assert "source ~/.bashrc" in result
+        assert "source ~/.bashrc 2>/dev/null" in result
 
     def test_cds_to_workdir(self):
         """The window rcfile cds to the given workdir."""
         result = _window_rcfile_content(Path("/some/path"), "lazygit")
         assert "cd /some/path" in result
 
-    def test_has_sleep_03(self):
-        """The window rcfile includes sleep 0.3 for terminal settling."""
+    def test_no_sleep(self):
+        """The window rcfile does not include a sleep — matches working amplifier-cli-tools pattern."""
         result = _window_rcfile_content(Path("/some/path"), "lazygit")
-        assert "sleep 0.3" in result
+        assert "sleep" not in result
 
-    def test_execs_command(self):
-        """The window rcfile execs the given command."""
+    def test_runs_command_without_exec(self):
+        """The window rcfile runs the command without 'exec' — bash stays alive after the tool exits."""
         result = _window_rcfile_content(Path("/some/path"), "lazygit")
-        assert "exec lazygit" in result
+        assert "lazygit" in result
+        assert "exec lazygit" not in result
 
     def test_command_with_args(self):
-        """The window rcfile execs a command with arguments."""
+        """The window rcfile runs a command with arguments (no exec)."""
         result = _window_rcfile_content(Path("/some/path"), "yazi /some/arg")
-        assert "exec yazi /some/arg" in result
+        assert "yazi /some/arg" in result
+        assert "exec yazi" not in result
 
 
 class TestWriteRcfiles:
@@ -244,14 +263,15 @@ class TestWriteRcfiles:
         assert (rcfile_base / "lazygit.rc").exists()
 
     def test_tool_rcfile_has_correct_command(self, tmp_path):
-        """The tool window rcfile uses _window_rcfile_content with the correct command."""
+        """The tool window rcfile uses _window_rcfile_content with the correct command (no exec)."""
         rcfile_base = tmp_path / "rcfiles"
         config = TmuxConfig(
             windows={"amplifier": "", "shell": "", "lazygit": "lazygit"}
         )
         _write_rcfiles(Path("/some/path"), config, rcfile_base=rcfile_base)
         content = (rcfile_base / "lazygit.rc").read_text()
-        assert "exec lazygit" in content
+        assert "lazygit" in content
+        assert "exec lazygit" not in content
 
     def test_skips_windows_with_empty_command(self, tmp_path):
         """_write_rcfiles skips creating rcfiles for windows with empty commands."""

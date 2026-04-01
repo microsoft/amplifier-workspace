@@ -103,46 +103,45 @@ def kill_session(name: str) -> None:
 def _main_rcfile_content(workdir: Path) -> str:
     """Generate rcfile content for the amplifier window.
 
-    Sources ~/.bashrc, cds to workdir, adds a short sleep for terminal
-    settling, discards stale input, then conditionally resumes an existing
-    Amplifier session or starts a fresh one.
+    Matches the proven working pattern from amplifier-cli-tools: source bashrc,
+    cd to workdir, settle terminal, check for existing sessions, run amplifier.
+    No 'exec' before amplifier — bash stays alive so the window drops to a
+    prompt when amplifier exits.
     """
     quoted_workdir = shlex.quote(str(workdir))
     return f"""\
-source ~/.bashrc
+source ~/.bashrc 2>/dev/null
 cd {quoted_workdir}
 sleep 0.5
-read -t 0.1 -n 10000 _discard 2>/dev/null || true
-if amplifier session list 2>/dev/null | grep -q .; then
-    exec amplifier resume
+read -t 0.2 -n 10000 discard 2>/dev/null || true
+session_output=$(amplifier session list 2>/dev/null)
+if echo "$session_output" | grep -q "No sessions found"; then
+    amplifier
+elif echo "$session_output" | grep -q "Session ID"; then
+    amplifier resume
 else
-    exec amplifier
+    amplifier
 fi
 """
 
 
 def _shell_rcfile_content(workdir: Path) -> str:
-    """Generate rcfile content for the shell window.
-
-    Sources ~/.bashrc and cds to workdir, then drops to an interactive
-    bash session (no exec command).
-    """
+    """Generate rcfile content for the shell window."""
     quoted_workdir = shlex.quote(str(workdir))
-    return f"source ~/.bashrc\ncd {quoted_workdir}\n"
+    return f"source ~/.bashrc 2>/dev/null\ncd {quoted_workdir}\n"
 
 
 def _window_rcfile_content(workdir: Path, command: str) -> str:
     """Generate rcfile content for a tool window (lazygit, yazi, etc.).
 
-    Sources ~/.bashrc, cds to workdir, sleeps 0.3 for terminal settling,
-    then execs the given command.
+    Does NOT use 'exec' before the command — bash stays alive so the window
+    drops to a prompt when the tool exits, matching the amplifier-cli-tools pattern.
     """
     quoted_workdir = shlex.quote(str(workdir))
     return f"""\
-source ~/.bashrc
+source ~/.bashrc 2>/dev/null
 cd {quoted_workdir}
-sleep 0.3
-exec {command}
+{command}
 """
 
 
