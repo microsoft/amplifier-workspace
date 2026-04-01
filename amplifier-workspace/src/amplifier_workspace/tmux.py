@@ -80,17 +80,17 @@ def _main_rcfile_content(workdir: Path) -> str:
     Amplifier session or starts a fresh one.
     """
     quoted_workdir = shlex.quote(str(workdir))
-    return (
-        "source ~/.bashrc\n"
-        f"cd {quoted_workdir}\n"
-        "sleep 0.5\n"
-        "read -t 0.1 -n 10000 _discard 2>/dev/null || true\n"
-        "if amplifier session list 2>/dev/null | grep -q .; then\n"
-        "    exec amplifier resume\n"
-        "else\n"
-        "    exec amplifier\n"
-        "fi\n"
-    )
+    return f"""\
+source ~/.bashrc
+cd {quoted_workdir}
+sleep 0.5
+read -t 0.1 -n 10000 _discard 2>/dev/null || true
+if amplifier session list 2>/dev/null | grep -q .; then
+    exec amplifier resume
+else
+    exec amplifier
+fi
+"""
 
 
 def _shell_rcfile_content(workdir: Path) -> str:

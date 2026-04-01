@@ -134,6 +134,12 @@ class TestMainRcfileContent:
         """The main rcfile checks for existing Amplifier sessions via 'amplifier session list'."""
         result = _main_rcfile_content(Path("/some/path"))
         assert "amplifier session list" in result
+        # The command must appear inside an 'if' conditional block, not as a standalone call
+        lines = result.splitlines()
+        assert any(
+            line.startswith("if ") and "amplifier session list" in line
+            for line in lines
+        )
 
     def test_exec_amplifier_resume_when_sessions_found(self):
         """The main rcfile runs 'exec amplifier resume' when sessions are found."""
