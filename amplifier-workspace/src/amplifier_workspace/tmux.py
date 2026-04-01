@@ -106,6 +106,10 @@ def _main_rcfile_content(workdir: Path) -> str:
     Sources ~/.bashrc, cds to workdir, adds a short sleep for terminal
     settling, discards stale input, then conditionally resumes an existing
     Amplifier session or starts a fresh one.
+
+    Does NOT use 'exec' before amplifier commands so that bash stays alive
+    after amplifier exits — the tmux window remains open instead of closing
+    when amplifier exits normally or on error.
     """
     quoted_workdir = shlex.quote(str(workdir))
     return f"""\
@@ -113,10 +117,13 @@ source ~/.bashrc
 cd {quoted_workdir}
 sleep 0.5
 read -t 0.1 -n 10000 _discard 2>/dev/null || true
-if amplifier session list 2>/dev/null | grep -q .; then
-    exec amplifier resume
+session_output=$(amplifier session list 2>/dev/null)
+if echo "$session_output" | grep -q "No sessions found"; then
+    amplifier
+elif echo "$session_output" | grep -q "Session ID"; then
+    amplifier resume
 else
-    exec amplifier
+    amplifier
 fi
 """
 

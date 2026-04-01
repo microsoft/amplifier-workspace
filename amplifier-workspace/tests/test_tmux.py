@@ -138,27 +138,32 @@ class TestMainRcfileContent:
         assert "sleep 0.5" in result
 
     def test_checks_amplifier_session_list(self):
-        """The main rcfile checks for existing Amplifier sessions via 'amplifier session list'."""
+        """The main rcfile captures 'amplifier session list' output to a variable."""
         result = _main_rcfile_content(Path("/some/path"))
         assert "amplifier session list" in result
-        # The command must appear inside an 'if' conditional block, not as a standalone call
+        # Output is captured to a variable, not piped directly into 'if'
         lines = result.splitlines()
         assert any(
-            line.startswith("if ") and "amplifier session list" in line
+            "session_output=" in line and "amplifier session list" in line
             for line in lines
         )
 
-    def test_exec_amplifier_resume_when_sessions_found(self):
-        """The main rcfile runs 'exec amplifier resume' when sessions are found."""
+    def test_amplifier_resume_when_sessions_found(self):
+        """The main rcfile runs 'amplifier resume' (no exec) when a Session ID is found."""
         result = _main_rcfile_content(Path("/some/path"))
         lines = result.splitlines()
-        assert any(line.strip() == "exec amplifier resume" for line in lines)
+        assert any(line.strip() == "amplifier resume" for line in lines)
 
-    def test_exec_amplifier_when_no_sessions(self):
-        """The main rcfile runs bare 'exec amplifier' in the else branch."""
+    def test_amplifier_when_no_sessions(self):
+        """The main rcfile runs bare 'amplifier' (no exec) in the no-sessions / fallback branches."""
         result = _main_rcfile_content(Path("/some/path"))
         lines = result.splitlines()
-        assert any(line.strip() == "exec amplifier" for line in lines)
+        assert any(line.strip() == "amplifier" for line in lines)
+
+    def test_no_exec_in_amplifier_commands(self):
+        """The main rcfile does NOT use 'exec amplifier' — bash must stay alive after amplifier exits."""
+        result = _main_rcfile_content(Path("/some/path"))
+        assert "exec amplifier" not in result
 
     def test_workdir_with_spaces_is_quoted(self):
         """Workdir paths containing spaces are safely quoted via shlex.quote."""
