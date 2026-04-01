@@ -83,23 +83,29 @@ class TestSessionExists:
 class TestKillSession:
     def test_kills_existing_session(self):
         """Calls tmux kill-session when session_exists returns True."""
-        with patch("amplifier_workspace.tmux.session_exists", return_value=True):
-            with patch("amplifier_workspace.tmux.subprocess.run") as mock_run:
-                kill_session("my-session")
+        with (
+            patch("amplifier_workspace.tmux.session_exists", return_value=True),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            kill_session("my-session")
         mock_run.assert_called_once()
 
     def test_noop_when_session_missing(self):
         """Does not call subprocess.run when session_exists returns False."""
-        with patch("amplifier_workspace.tmux.session_exists", return_value=False):
-            with patch("amplifier_workspace.tmux.subprocess.run") as mock_run:
-                kill_session("nonexistent-session")
+        with (
+            patch("amplifier_workspace.tmux.session_exists", return_value=False),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            kill_session("nonexistent-session")
         mock_run.assert_not_called()
 
     def test_passes_name_to_kill_command(self):
         """The session name is passed to the tmux kill-session command."""
-        with patch("amplifier_workspace.tmux.session_exists", return_value=True):
-            with patch("amplifier_workspace.tmux.subprocess.run") as mock_run:
-                kill_session("my-named-session")
+        with (
+            patch("amplifier_workspace.tmux.session_exists", return_value=True),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            kill_session("my-named-session")
         call_args = mock_run.call_args
         cmd = call_args[0][0]  # first positional argument is the command list
         assert "my-named-session" in cmd
