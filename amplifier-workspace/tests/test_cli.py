@@ -108,3 +108,51 @@ def test_cli_list_subcommand_prints_placeholder(capsys):
 
     captured = capsys.readouterr()
     assert len(captured.out.strip()) > 0
+
+
+# ---------------------------------------------------------------------------
+# -k / --kill flag
+# ---------------------------------------------------------------------------
+
+
+class TestCliKillFlag:
+    """Tests for the -k/--kill flag wiring through to run_workspace."""
+
+    def test_kill_flag_passes_kill_true(self, tmp_path):
+        """-k flag passes kill=True to run_workspace."""
+        with (
+            patch("amplifier_workspace.config.load_config") as mock_cfg,
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            mock_cfg.return_value = MagicMock()
+            cli.main([str(tmp_path), "-k"])
+
+        mock_rw.assert_called_once()
+        _, kwargs = mock_rw.call_args
+        assert kwargs.get("kill") is True
+
+    def test_no_kill_flag_passes_kill_false(self, tmp_path):
+        """Omitting -k passes kill=False to run_workspace."""
+        with (
+            patch("amplifier_workspace.config.load_config") as mock_cfg,
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            mock_cfg.return_value = MagicMock()
+            cli.main([str(tmp_path)])
+
+        mock_rw.assert_called_once()
+        _, kwargs = mock_rw.call_args
+        assert kwargs.get("kill") is False
+
+    def test_kill_flag_passes_correct_workdir(self, tmp_path):
+        """-k flag passes the resolved workdir as the first positional arg."""
+        with (
+            patch("amplifier_workspace.config.load_config") as mock_cfg,
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            mock_cfg.return_value = MagicMock()
+            cli.main([str(tmp_path), "-k"])
+
+        mock_rw.assert_called_once()
+        call_args, _ = mock_rw.call_args
+        assert call_args[0] == tmp_path.resolve()

@@ -103,7 +103,7 @@ def _cmd_list() -> None:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Entry point for the amplifier-workspace CLI."""
     try:
         # Fast-path: dispatch known subcommands before the workdir parser sees them.
@@ -211,10 +211,10 @@ def main() -> None:
             "-k",
             "--kill",
             action="store_true",
-            help="Kill an existing Amplifier session (coming in Phase 2).",
+            help="Kill the tmux session for this workspace (directory is preserved).",
         )
 
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
 
         if args.workdir is None:
             parser.print_help()
@@ -229,7 +229,9 @@ def main() -> None:
 
         from amplifier_workspace.workspace import run_workspace
 
-        run_workspace(workdir, config, destroy=args.destroy, fresh=args.fresh)
+        run_workspace(
+            workdir, config, kill=args.kill, destroy=args.destroy, fresh=args.fresh
+        )
 
     except KeyboardInterrupt:
         sys.exit(130)
