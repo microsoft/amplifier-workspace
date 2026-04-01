@@ -3,6 +3,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from amplifier_workspace.upgrade import (
     _check_for_update,
     _do_upgrade,
@@ -214,7 +216,8 @@ class TestRunUpgrade:
         mock_do_upgrade.assert_not_called()
         captured = capsys.readouterr()
         # Should have printed version/commit/source info
-        assert "1.0.0" in captured.out or "git" in captured.out
+        assert "1.0.0" in captured.out
+        assert "git" in captured.out
 
     def test_skips_install_when_already_up_to_date(self, capsys):
         """run_upgrade skips _do_upgrade when _check_for_update returns False."""
@@ -236,7 +239,7 @@ class TestRunUpgrade:
         assert "up to date" in captured.out.lower() or "already" in captured.out.lower()
 
     def test_installs_when_update_available(self):
-        """run_upgrade calls _do_upgrade when _check_for_update returns True."""
+        """run_upgrade calls _do_upgrade and _run_doctor_after_upgrade when update available."""
         with (
             patch(
                 "amplifier_workspace.upgrade._get_install_info",
@@ -249,14 +252,17 @@ class TestRunUpgrade:
             patch(
                 "amplifier_workspace.upgrade._do_upgrade", return_value=True
             ) as mock_do_upgrade,
-            patch("amplifier_workspace.upgrade._run_doctor_after_upgrade"),
+            patch(
+                "amplifier_workspace.upgrade._run_doctor_after_upgrade"
+            ) as mock_doctor,
         ):
             run_upgrade()
 
         mock_do_upgrade.assert_called_once_with(_SAMPLE_INFO)
+        mock_doctor.assert_called_once()
 
     def test_force_skips_version_check(self):
-        """run_upgrade(force=True) skips _check_for_update entirely."""
+        """run_upgrade(force=True) skips _check_for_update and calls _run_doctor_after_upgrade."""
         with (
             patch(
                 "amplifier_workspace.upgrade._get_install_info",
@@ -264,11 +270,36 @@ class TestRunUpgrade:
             ),
             patch("amplifier_workspace.upgrade._check_for_update") as mock_check,
             patch("amplifier_workspace.upgrade._do_upgrade", return_value=True),
-            patch("amplifier_workspace.upgrade._run_doctor_after_upgrade"),
+            patch(
+                "amplifier_workspace.upgrade._run_doctor_after_upgrade"
+            ) as mock_doctor,
         ):
             run_upgrade(force=True)
 
         mock_check.assert_not_called()
+        mock_doctor.assert_called_once()
+
+    def test_exits_with_error_when_upgrade_fails(self):
+        """run_upgrade calls sys.exit(1) when _do_upgrade returns False."""
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                return_value=_SAMPLE_INFO,
+            ),
+            patch(
+                "amplifier_workspace.upgrade._check_for_update",
+                return_value=(True, "update available (abcd1234 → efgh5678)"),
+            ),
+            patch("amplifier_workspace.upgrade._do_upgrade", return_value=False),
+            patch(
+                "amplifier_workspace.upgrade._run_doctor_after_upgrade"
+            ) as mock_doctor,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                run_upgrade()
+
+        assert exc_info.value.code == 1
+        mock_doctor.assert_not_called()
 
 
 class TestDoUpgrade:

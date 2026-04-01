@@ -127,16 +127,14 @@ def _do_upgrade(info: dict) -> bool:
     uv_path = shutil.which("uv")
     if uv_path:
         result = subprocess.run(
-            ["uv", "tool", "install", "--force", git_url],
-            capture_output=False,
+            [uv_path, "tool", "install", "--force", git_url],
         )
         return result.returncode == 0
 
     pip_path = shutil.which("pip")
     if pip_path:
         result = subprocess.run(
-            ["pip", "install", "--upgrade", git_url],
-            capture_output=False,
+            [pip_path, "install", "--upgrade", git_url],
         )
         return result.returncode == 0
 
@@ -146,8 +144,6 @@ def _do_upgrade(info: dict) -> bool:
 
 def _run_doctor_after_upgrade() -> None:
     """Lazily import and run doctor.run_doctor() to verify new install."""
-    import importlib
-
     doctor = importlib.import_module("amplifier_workspace.doctor")
     doctor.run_doctor()
 
