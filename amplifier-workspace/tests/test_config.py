@@ -1,6 +1,8 @@
 """Tests for config.py dataclasses: WorkspaceConfig and TmuxConfig defaults."""
 
-from amplifier_workspace.config import TmuxConfig, WorkspaceConfig
+from pathlib import Path
+
+from amplifier_workspace.config import TmuxConfig, WorkspaceConfig, load_config
 
 
 class TestWorkspaceConfigDefaults:
@@ -43,3 +45,52 @@ class TestTmuxConfig:
         custom_windows = {"main": "vim .", "logs": "tail -f app.log"}
         tmux = TmuxConfig(windows=custom_windows)
         assert tmux.windows == custom_windows
+
+
+class TestLoadConfig:
+    def test_returns_defaults_when_file_missing(self, tmp_path: Path):
+        cfg = load_config(tmp_path / "nonexistent.toml")
+        assert cfg.bundle == "amplifier-dev"
+        assert len(cfg.default_repos) == 3
+        assert cfg.tmux.enabled is False
+
+    def test_merges_bundle_from_file(self, tmp_path: Path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('[workspace]\nbundle = "my-custom-bundle"\n')
+        cfg = load_config(config_file)
+        assert cfg.bundle == "my-custom-bundle"
+        assert len(cfg.default_repos) == 3
+
+    def test_merges_repos_from_file(self, tmp_path: Path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(
+            '[workspace]\ndefault_repos = ["https://github.com/example/repo.git"]\n'
+        )
+        cfg = load_config(config_file)
+        assert cfg.default_repos == ["https://github.com/example/repo.git"]
+
+    def test_merges_tmux_enabled(self, tmp_path: Path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("[tmux]\nenabled = true\n")
+        cfg = load_config(config_file)
+        assert cfg.tmux.enabled is True
+
+    def test_merges_tmux_windows(self, tmp_path: Path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("[tmux.windows]\ncustom_window = 'vim .'\n")
+        cfg = load_config(config_file)
+        assert cfg.tmux.windows == {"custom_window": "vim ."}
+
+    def test_expands_tilde_in_agents_template(self, tmp_path: Path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text('[workspace]\nagents_template = "~/my-template.md"\n')
+        cfg = load_config(config_file)
+        assert not cfg.agents_template.startswith("~")
+        assert cfg.agents_template.endswith("my-template.md")
+
+    def test_partial_tmux_config_keeps_defaults(self, tmp_path: Path):
+        config_file = tmp_path / "config.toml"
+        config_file.write_text("[tmux]\nenabled = true\n")
+        cfg = load_config(config_file)
+        assert cfg.tmux.enabled is True
+        assert "amplifier" in cfg.tmux.windows
