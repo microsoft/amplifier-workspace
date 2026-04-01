@@ -1,5 +1,6 @@
 """Tests for tmux.py: session_name_from_path, session_exists, kill_session, and rcfile helpers."""
 
+import os
 import stat
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ from amplifier_workspace.tmux import (
     _shell_rcfile_content,
     _window_rcfile_content,
     _write_rcfiles,
+    attach_session,
     create_session,
     kill_session,
     session_exists,
@@ -480,3 +482,55 @@ class TestCreateSessionWindows:
         shell_cmd = cmd[-1]
         assert "git.rc" in shell_cmd, "Tool window should use git.rc as its rcfile"
         assert "--rcfile" in shell_cmd, "Tool window should use --rcfile flag"
+
+
+class TestAttachSession:
+    def test_attach_outside_tmux_uses_attach_session(self):
+        """When TMUX env var is not set, calls execvp with 'attach-session' command."""
+        env_without_tmux = {k: v for k, v in os.environ.items() if k != "TMUX"}
+        with (
+            patch("amplifier_workspace.tmux.os.execvp") as mock_execvp,
+            patch.dict(os.environ, env_without_tmux, clear=True),
+        ):
+            attach_session("my-session")
+        mock_execvp.assert_called_once()
+        args = mock_execvp.call_args.args
+        assert args[0] == "tmux"
+        assert "attach-session" in args[1]
+
+    def test_switch_client_inside_tmux(self):
+        """When TMUX env var is set, calls execvp with 'switch-client' command."""
+        with (
+            patch("amplifier_workspace.tmux.os.execvp") as mock_execvp,
+            patch.dict(os.environ, {"TMUX": "/tmp/tmux-1000/default,1234,0"}),
+        ):
+            attach_session("my-session")
+        mock_execvp.assert_called_once()
+        args = mock_execvp.call_args.args
+        assert args[0] == "tmux"
+        assert "switch-client" in args[1]
+
+    def test_passes_session_name_correctly(self):
+        """Session name is passed as the -t argument in both outside and inside tmux scenarios."""
+        # Outside tmux
+        env_without_tmux = {k: v for k, v in os.environ.items() if k != "TMUX"}
+        with (
+            patch("amplifier_workspace.tmux.os.execvp") as mock_execvp,
+            patch.dict(os.environ, env_without_tmux, clear=True),
+        ):
+            attach_session("target-session")
+        args_outside = mock_execvp.call_args.args
+        cmd_outside = args_outside[1]
+        t_index = cmd_outside.index("-t")
+        assert cmd_outside[t_index + 1] == "target-session"
+
+        # Inside tmux
+        with (
+            patch("amplifier_workspace.tmux.os.execvp") as mock_execvp,
+            patch.dict(os.environ, {"TMUX": "/tmp/tmux-1000/default,1234,0"}),
+        ):
+            attach_session("target-session")
+        args_inside = mock_execvp.call_args.args
+        cmd_inside = args_inside[1]
+        t_index = cmd_inside.index("-t")
+        assert cmd_inside[t_index + 1] == "target-session"

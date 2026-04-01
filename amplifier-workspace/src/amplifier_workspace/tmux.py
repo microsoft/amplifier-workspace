@@ -6,6 +6,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,10 +19,36 @@ __all__ = [
     "session_exists",
     "kill_session",
     "create_session",
+    "attach_session",
 ]
 
 SESSION_NAME_MAX: int = 32
 _RESERVED_WINDOW_NAMES: frozenset[str] = frozenset({"amplifier", "shell"})
+
+
+def attach_session(name: str) -> None:
+    """Attach to or switch to a tmux session by name.
+
+    Never returns on POSIX — the current process is replaced by tmux via os.execvp.
+
+    Behavior:
+    - Outside tmux (TMUX env var not set): execvp 'tmux attach-session -t <name>'
+    - Inside tmux (TMUX env var set): execvp 'tmux switch-client -t <name>'
+
+    On Windows (sys.platform == 'win32'), falls back to subprocess.run +
+    sys.exit(result.returncode) since os.execvp is unavailable.
+    """
+    if sys.platform == "win32":
+        if os.environ.get("TMUX"):
+            result = subprocess.run(["tmux", "switch-client", "-t", name])
+        else:
+            result = subprocess.run(["tmux", "attach-session", "-t", name])
+        sys.exit(result.returncode)
+    else:
+        if os.environ.get("TMUX"):
+            os.execvp("tmux", ["tmux", "switch-client", "-t", name])
+        else:
+            os.execvp("tmux", ["tmux", "attach-session", "-t", name])
 
 
 def session_name_from_path(workdir: Path) -> str:
