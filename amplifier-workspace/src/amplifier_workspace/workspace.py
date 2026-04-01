@@ -12,6 +12,7 @@ from pathlib import Path
 
 from amplifier_workspace.config import WorkspaceConfig
 from amplifier_workspace import git as _git
+from amplifier_workspace import tmux
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +113,20 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Amplifier launcher
+# Amplifier launchers
 # ---------------------------------------------------------------------------
+
+
+def _launch_with_tmux(workdir: Path, config: WorkspaceConfig) -> None:
+    """Create a tmux session for *workdir* and attach to it.
+
+    Creates the session via ``tmux.create_session`` then attaches/switches to
+    it via ``tmux.attach_session``.  On POSIX the current process is replaced
+    by tmux; on Windows ``sys.exit`` is called after attach.
+    """
+    tmux.create_session(workdir, config.tmux)
+    name = tmux.session_name_from_path(workdir)
+    tmux.attach_session(name)
 
 
 def _launch_amplifier(workdir: Path) -> None:
@@ -156,19 +169,26 @@ def run_workspace(
     workdir: Path,
     config: WorkspaceConfig,
     *,
+    kill: bool = False,
     destroy: bool = False,
     fresh: bool = False,
 ) -> None:
     """Orchestrate the full workspace lifecycle.
 
+    kill:
+        If tmux is enabled, kill the tmux session for *workdir* and return
+        immediately (the directory is preserved).  No-op when tmux is disabled.
+
     destroy (without fresh):
-        Remove the workspace directory and return — no further action.
+        If tmux is enabled, kill the tmux session first.  Then remove the
+        workspace directory and return — no further action.
 
     fresh:
-        Remove the workspace directory if it exists, then set up from scratch.
+        If tmux is enabled, kill the tmux session and remove the directory.
+        Then fall through to normal setup.
 
     Default:
-        Set up the workspace and launch Amplifier.
+        Set up the workspace and launch Amplifier (or tmux if enabled).
     """
     # First-run wizard trigger — lazy imports avoid circular dependency through wizard
     from amplifier_workspace.config_manager import CONFIG_PATH  # noqa: PLC0415
@@ -180,13 +200,33 @@ def run_workspace(
 
     config = load_config()  # re-load config (wizard may have just written it)
 
+    # 1) kill flag: terminate tmux session without touching the directory
+    if kill:
+        if config.tmux.enabled:
+            name = tmux.session_name_from_path(workdir)
+            tmux.kill_session(name)
+        return
+
+    # 2) destroy flag: kill tmux session first (if enabled), then remove directory
     if destroy and not fresh:
+        if config.tmux.enabled:
+            name = tmux.session_name_from_path(workdir)
+            tmux.kill_session(name)
         if workdir.exists():
             shutil.rmtree(workdir)
         return
 
-    if fresh and workdir.exists():
-        shutil.rmtree(workdir)
+    # 3) fresh flag: kill tmux session (if enabled) and remove directory, then fall through
+    if fresh:
+        if config.tmux.enabled:
+            name = tmux.session_name_from_path(workdir)
+            tmux.kill_session(name)
+        if workdir.exists():
+            shutil.rmtree(workdir)
 
+    # 4) Normal path: set up workspace, then launch (with or without tmux)
     setup_workspace(workdir, config)
-    _launch_amplifier(workdir)
+    if config.tmux.enabled:
+        _launch_with_tmux(workdir, config)
+    else:
+        _launch_amplifier(workdir)

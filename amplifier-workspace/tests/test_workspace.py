@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from amplifier_workspace.config import WorkspaceConfig
+from amplifier_workspace.config import WorkspaceConfig, TmuxConfig
 from amplifier_workspace.workspace import (
     create_agents_md,
     create_amplifier_settings,
@@ -278,3 +278,122 @@ class TestRunWorkspace:
         config = WorkspaceConfig()
         run_workspace(tmp_path, config)
         mock_run_wizard.assert_not_called()
+
+
+class TestRunWorkspaceKillFlag:
+    @patch("amplifier_workspace.workspace.tmux.kill_session")
+    @patch("amplifier_workspace.workspace.tmux.session_name_from_path")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_kill_calls_kill_session_when_tmux_enabled(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_session_name,
+        mock_kill_session,
+        tmp_path: Path,
+    ):
+        """kill=True with tmux enabled calls tmux.kill_session with derived session name."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=True))
+        mock_session_name.return_value = "my-workspace"
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, kill=True)
+        mock_session_name.assert_called_once_with(tmp_path)
+        mock_kill_session.assert_called_once_with("my-workspace")
+
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.workspace.tmux.kill_session")
+    @patch("amplifier_workspace.workspace.tmux.session_name_from_path")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_kill_returns_without_modifying_directory(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_session_name,
+        mock_kill_session,
+        mock_rmtree,
+        mock_setup,
+        tmp_path: Path,
+    ):
+        """kill=True returns immediately — no rmtree and no setup_workspace called."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=True))
+        mock_session_name.return_value = "my-workspace"
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, kill=True)
+        mock_rmtree.assert_not_called()
+        mock_setup.assert_not_called()
+
+    @patch("amplifier_workspace.workspace.tmux.kill_session")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_kill_noop_when_tmux_disabled(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_kill_session,
+        tmp_path: Path,
+    ):
+        """kill=True with tmux disabled is a no-op — kill_session is never called."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=False))
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, kill=True)
+        mock_kill_session.assert_not_called()
+
+
+class TestRunWorkspaceDestroyWithTmux:
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.workspace.tmux.kill_session")
+    @patch("amplifier_workspace.workspace.tmux.session_name_from_path")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_kills_tmux_session_before_rmtree(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_session_name,
+        mock_kill_session,
+        mock_rmtree,
+        tmp_path: Path,
+    ):
+        """destroy=True with tmux enabled kills the session before removing the directory."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=True))
+        mock_session_name.return_value = "my-workspace"
+
+        call_order: list[str] = []
+        mock_kill_session.side_effect = lambda *_: call_order.append("kill_session")
+        mock_rmtree.side_effect = lambda *_: call_order.append("rmtree")
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, destroy=True)
+
+        assert call_order == ["kill_session", "rmtree"]
+
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.workspace.tmux.kill_session")
+    @patch("amplifier_workspace.workspace.tmux.session_name_from_path")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_still_removes_directory(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_session_name,
+        mock_kill_session,
+        mock_rmtree,
+        tmp_path: Path,
+    ):
+        """destroy=True with tmux enabled still removes the workspace directory."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=True))
+        mock_session_name.return_value = "my-workspace"
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, destroy=True)
+
+        mock_rmtree.assert_called_once_with(tmp_path)
