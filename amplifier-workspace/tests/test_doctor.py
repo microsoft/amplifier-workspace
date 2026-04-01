@@ -354,3 +354,154 @@ class TestTmuxChecks:
 
         assert "issue" in captured.out.lower()
         assert exit_code == 1
+
+
+class TestDoctorTmuxChecks:
+    """Tests for tmux-aware doctor checks (task-12)."""
+
+    def test_tmux_check_runs_when_enabled(self, capsys):
+        """When tmux.enabled=True and tmux found, output contains 'tmux'."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {}
+
+        which_fn = _make_which({"git", "amplifier", "tmux"})
+
+        with patch(
+            "amplifier_workspace.doctor.subprocess.run",
+            return_value=MagicMock(stdout="tmux 3.3a\n"),
+        ):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        assert "tmux" in captured.out.lower()
+        assert exit_code == 0
+
+    def test_tmux_skipped_when_disabled(self, capsys):
+        """When tmux.enabled=False, output contains 'skipped' or 'not enabled'."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = False
+
+        which_fn = _make_which({"git", "amplifier"})
+
+        exit_code, captured = _doctor_with_tmux_config(mock_config, which_fn, capsys)
+
+        assert (
+            "skipped" in captured.out.lower() or "not enabled" in captured.out.lower()
+        )
+
+    def test_tmux_not_found_is_failure(self, capsys):
+        """When tmux.enabled=True but tmux binary not found, return code != 0."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {}
+
+        # tmux is NOT found
+        which_fn = _make_which({"git", "amplifier"})
+
+        with patch("amplifier_workspace.doctor.get_install_hint", return_value=None):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        assert exit_code != 0
+
+    def test_tool_window_checked_when_configured(self, capsys):
+        """When tmux.windows has lazygit, output contains 'lazygit'."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {"lazygit": "lazygit"}
+
+        which_fn = _make_which({"git", "amplifier", "tmux", "lazygit"})
+
+        with patch(
+            "amplifier_workspace.doctor.subprocess.run",
+            return_value=MagicMock(stdout="tmux 3.3a\n"),
+        ):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        assert "lazygit" in captured.out
+        assert exit_code == 0
+
+    def test_missing_tool_window_is_failure(self, capsys):
+        """When lazygit window configured but lazygit missing, return code != 0."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {"lazygit": "lazygit"}
+
+        # tmux found, lazygit NOT found
+        which_fn = _make_which({"git", "amplifier", "tmux"})
+
+        with (
+            patch(
+                "amplifier_workspace.doctor.subprocess.run",
+                return_value=MagicMock(stdout="tmux 3.3a\n"),
+            ),
+            patch("amplifier_workspace.doctor.get_install_hint", return_value=None),
+        ):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        assert exit_code != 0
+
+    def test_missing_tool_shows_install_hint(self, capsys):
+        """When a window tool is missing, output contains 'config', 'remove', or 'install'."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {"lazygit": "lazygit"}
+
+        # tmux found, lazygit NOT found
+        which_fn = _make_which({"git", "amplifier", "tmux"})
+
+        with (
+            patch(
+                "amplifier_workspace.doctor.subprocess.run",
+                return_value=MagicMock(stdout="tmux 3.3a\n"),
+            ),
+            patch(
+                "amplifier_workspace.doctor.get_install_hint",
+                return_value="brew install lazygit",
+            ),
+        ):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        # Must contain at least one of: 'config', 'remove', 'install'
+        assert any(kw in captured.out.lower() for kw in ("config", "remove", "install"))
+
+    def test_windows_with_empty_command_not_checked(self, capsys):
+        """Windows with empty command string do not cause failures."""
+        mock_config = MagicMock()
+        mock_config.default_repos = []
+        mock_config.agents_template = ""
+        mock_config.tmux.enabled = True
+        mock_config.tmux.windows = {"empty_window": ""}
+
+        which_fn = _make_which({"git", "amplifier", "tmux"})
+
+        with patch(
+            "amplifier_workspace.doctor.subprocess.run",
+            return_value=MagicMock(stdout="tmux 3.3a\n"),
+        ):
+            exit_code, captured = _doctor_with_tmux_config(
+                mock_config, which_fn, capsys
+            )
+
+        assert exit_code == 0
