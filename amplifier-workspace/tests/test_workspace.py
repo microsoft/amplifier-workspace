@@ -1,5 +1,6 @@
 """Tests for workspace.py: create_agents_md and create_amplifier_settings."""
 
+import pytest
 from pathlib import Path
 
 from amplifier_workspace.config import WorkspaceConfig
@@ -36,9 +37,10 @@ class TestCreateAgentsMd:
         assert agents_md.read_text() == "# Custom Template\n\nCustom content here.\n"
 
     def test_falls_back_to_builtin_if_custom_path_missing(self, tmp_path: Path):
-        """Falls back to builtin template if custom path does not exist."""
+        """Falls back to builtin template if custom path does not exist, and warns."""
         config = WorkspaceConfig(agents_template="/nonexistent/path/AGENTS.md")
-        create_agents_md(tmp_path, config)
+        with pytest.warns(UserWarning, match="agents_template path does not exist"):
+            create_agents_md(tmp_path, config)
         agents_md = tmp_path / "AGENTS.md"
         assert agents_md.exists()
         assert len(agents_md.read_text()) > 100

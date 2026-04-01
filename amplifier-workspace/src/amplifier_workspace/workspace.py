@@ -54,6 +54,10 @@ def create_agents_md(workdir: Path, config: WorkspaceConfig) -> None:
         target.write_text(content)
         return
     except Exception:
+        warnings.warn(
+            "Could not load builtin AGENTS.md template; writing minimal placeholder.",
+            stacklevel=2,
+        )
         pass
 
     # Last resort: minimal content
