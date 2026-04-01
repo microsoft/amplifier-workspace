@@ -101,13 +101,17 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
     workdir.mkdir(parents=True, exist_ok=True)
 
     if not _git.is_git_repo(workdir):
+        print(f"Creating workspace: {workdir.name}")
         _git.init_repo(workdir)
         for url in config.default_repos:
             _git.add_submodule(workdir, url)
         if config.default_repos:
             _git.checkout_submodules(workdir)
+        create_agents_md(workdir, config)
+        create_amplifier_settings(workdir, config)
         _git.initial_commit(workdir, "chore: initialise workspace")
 
+    # Always run idempotently for existing workspaces (no-op if files already exist)
     create_agents_md(workdir, config)
     create_amplifier_settings(workdir, config)
 
