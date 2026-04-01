@@ -1,0 +1,15 @@
+[workspace]
+default_repos = [
+  "https://github.com/microsoft/amplifier.git",
+  "https://github.com/microsoft/amplifier-core.git",
+  "https://github.com/microsoft/amplifier-foundation.git",
+]
+bundle = "amplifier-dev"
+agents_template = ""
+
+[tmux]
+enabled = false
+
+[tmux.windows]
+amplifier = ""
+shell = ""
