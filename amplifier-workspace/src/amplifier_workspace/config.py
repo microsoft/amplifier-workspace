@@ -40,7 +40,11 @@ class WorkspaceConfig:
 
 
 def _load_bundled_defaults() -> dict:
-    """Load default-config.toml bundled with the package. Returns {} on failure."""
+    """Load default-config.toml bundled with the package. Returns {} on failure.
+
+    Reserved for future layered config loading (bundled-defaults → user-config →
+    dataclass-defaults). Not yet wired into load_config().
+    """
     try:
         pkg = (
             importlib.resources.files("amplifier_workspace")
@@ -49,7 +53,7 @@ def _load_bundled_defaults() -> dict:
         )
         data = pkg.read_bytes()
         return tomllib.loads(data.decode())
-    except Exception:
+    except Exception:  # any resource/parse failure is non-fatal
         return {}
 
 
