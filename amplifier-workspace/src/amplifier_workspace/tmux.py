@@ -211,30 +211,31 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
             check=True,
         )
 
-    # 3) Shell window (always last) — create window then add a second pane via horizontal split
-    subprocess.run(
-        [
-            "tmux",
-            "new-window",
-            "-t",
-            name,
-            "-n",
-            "shell",
-            f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
-        ],
-        check=True,
-    )
-    subprocess.run(
-        [
-            "tmux",
-            "split-window",
-            "-h",
-            "-t",
-            f"{name}:shell",
-            f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
-        ],
-        check=True,
-    )
+    # 3) Shell window (last, if configured) — create window then add a second pane via horizontal split
+    if "shell" in config.windows:
+        subprocess.run(
+            [
+                "tmux",
+                "new-window",
+                "-t",
+                name,
+                "-n",
+                "shell",
+                f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "tmux",
+                "split-window",
+                "-h",
+                "-t",
+                f"{name}:shell",
+                f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
+            ],
+            check=True,
+        )
 
     # 4) Select amplifier window so it is focused on attach
     subprocess.run(

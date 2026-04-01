@@ -381,3 +381,102 @@ class TestCreateSession:
         shell_cmd = cmd[-1]
         assert "lazygit.rc" in shell_cmd
         assert "--rcfile" in shell_cmd
+
+
+class TestCreateSessionWindows:
+    def test_tool_windows_created_before_shell(self, tmp_path):
+        """Tool window new-window calls appear before the shell new-window call."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "git": "lazygit", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        # Find the positional index of the shell new-window call
+        shell_call_pos = next(
+            i
+            for i, c in enumerate(calls)
+            if "new-window" in c.args[0] and "shell" in c.args[0]
+        )
+        # Find the positional index of the git tool new-window call
+        git_call_pos = next(
+            i
+            for i, c in enumerate(calls)
+            if "new-window" in c.args[0] and "git" in c.args[0]
+        )
+        assert git_call_pos < shell_call_pos, (
+            "Tool window new-window should be called before shell new-window"
+        )
+
+    def test_shell_window_gets_horizontal_split(self, tmp_path):
+        """Shell window gets exactly one horizontal split via split-window -h."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        split_calls = [
+            c for c in calls if "split-window" in c.args[0] and "-h" in c.args[0]
+        ]
+        assert len(split_calls) == 1, "Expected exactly one split-window -h call"
+
+    def test_no_split_when_no_shell_window(self, tmp_path):
+        """No split-window call when config has no shell window."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        split_calls = [c for c in calls if "split-window" in c.args[0]]
+        assert len(split_calls) == 0, (
+            "Expected no split-window calls when no shell window is configured"
+        )
+
+    def test_windows_with_empty_command_skipped(self, tmp_path):
+        """Windows with empty command string are not created via new-window."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "nocommand": "", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        nocommand_calls = [
+            c for c in calls if "new-window" in c.args[0] and "nocommand" in c.args[0]
+        ]
+        assert len(nocommand_calls) == 0, (
+            "Window with empty command should not be created via new-window"
+        )
+
+    def test_tool_window_uses_named_rcfile(self, tmp_path):
+        """Tool window new-window command references the window's named rcfile (e.g. git.rc)."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": "", "git": "lazygit", "shell": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+        calls = mock_run.call_args_list
+        git_calls = [
+            c for c in calls if "new-window" in c.args[0] and "git" in c.args[0]
+        ]
+        assert len(git_calls) == 1, "Expected exactly one new-window call for git"
+        cmd = git_calls[0].args[0]
+        shell_cmd = cmd[-1]
+        assert "git.rc" in shell_cmd, "Tool window should use git.rc as its rcfile"
+        assert "--rcfile" in shell_cmd, "Tool window should use --rcfile flag"
