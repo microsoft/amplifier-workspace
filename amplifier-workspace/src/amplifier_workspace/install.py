@@ -1,8 +1,13 @@
 """Install hints and package manager detection for workspace tools."""
 
+import json
 import platform
 import shutil
 import subprocess
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
 
 # Registry of known tools and their package names per package manager
 KNOWN_TOOLS: dict[str, dict[str, str]] = {
@@ -112,9 +117,70 @@ def get_install_hint(command: str) -> str | None:
 
 
 def _install_lazygit_linux() -> tuple[bool, str]:
-    """Install lazygit on Linux. Implementation in Task 3."""
-    # Stub — body will be added in Task 3
-    raise NotImplementedError("_install_lazygit_linux not yet implemented")
+    """Install lazygit on Linux via GitHub releases.
+
+    Fetches the latest release tarball from GitHub, extracts the binary, and
+    installs it to /usr/local/bin (with sudo) or ~/.local/bin as a fallback.
+
+    Returns (success, message) tuple.
+    """
+    try:
+        arch = _get_arch()
+        if arch not in ("x86_64", "arm64"):
+            return (False, f"Unsupported architecture: {arch}")
+
+        # Fetch latest release version from GitHub API
+        with urllib.request.urlopen(
+            "https://api.github.com/repos/jesseduffield/lazygit/releases/latest",
+            timeout=30,
+        ) as resp:
+            data = json.loads(resp.read().decode())
+
+        version = data["tag_name"].lstrip("v")
+
+        # Build tarball URL
+        tarball_url = (
+            f"https://github.com/jesseduffield/lazygit/releases/download/"
+            f"v{version}/lazygit_{version}_Linux_{arch}.tar.gz"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tarball_path = Path(tmp_dir) / f"lazygit_{version}.tar.gz"
+            urllib.request.urlretrieve(tarball_url, str(tarball_path))
+
+            # Extract lazygit binary from tarball
+            with tarfile.open(str(tarball_path)) as tf:
+                member = tf.getmember("lazygit")
+                tf.extract(member, tmp_dir)
+
+            lazygit_bin = Path(tmp_dir) / "lazygit"
+
+            # Try /usr/local/bin with sudo first
+            if _has_sudo():
+                result = subprocess.run(
+                    [
+                        "sudo",
+                        "install",
+                        str(lazygit_bin),
+                        "-D",
+                        "-t",
+                        "/usr/local/bin/",
+                    ],
+                    capture_output=True,
+                )
+                if result.returncode == 0:
+                    return (True, "Successfully installed lazygit to /usr/local/bin/")
+
+            # Fallback: ~/.local/bin (no sudo needed)
+            local_bin = Path.home() / ".local" / "bin"
+            local_bin.mkdir(parents=True, exist_ok=True)
+            dest = local_bin / "lazygit"
+            shutil.copy2(str(lazygit_bin), str(dest))
+            dest.chmod(0o755)
+            return (True, f"Successfully installed lazygit to {dest}")
+
+    except Exception as exc:
+        return (False, f"Failed to install lazygit: {exc}")
 
 
 def install_tool(name: str) -> tuple[bool, str]:

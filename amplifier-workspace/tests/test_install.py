@@ -1,9 +1,14 @@
 """Tests for install.py: KNOWN_TOOLS registry, detect_package_manager, get_install_hint."""
 
+import io
+import json
+import stat
+import tarfile
 from unittest.mock import MagicMock, patch
 
 from amplifier_workspace.install import (
     KNOWN_TOOLS,
+    _install_lazygit_linux,
     detect_package_manager,
     get_install_hint,
     install_tool,
@@ -207,3 +212,62 @@ class TestInstallTool:
                 result = install_tool("lazygit")
         mock_fn.assert_called_once()
         assert result == (True, "installed")
+
+
+class TestInstallLazygitLinux:
+    def test_install_lazygit_linux_installs_to_local_bin(self, tmp_path):
+        """Creates real .tar.gz with fake lazygit binary, installs to ~/.local/bin."""
+        fake_binary_content = b"#!/bin/sh\necho lazygit\n"
+        tarball_path = tmp_path / "lazygit.tar.gz"
+        with tarfile.open(str(tarball_path), "w:gz") as tf:
+            info = tarfile.TarInfo(name="lazygit")
+            info.size = len(fake_binary_content)
+            info.mode = stat.S_IRWXU
+            tf.addfile(info, io.BytesIO(fake_binary_content))
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"tag_name": "v0.40.0"}).encode()
+        mock_response.__enter__ = lambda self: self
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        def fake_urlretrieve(url, dest):
+            import shutil as _shutil
+
+            _shutil.copy(str(tarball_path), dest)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+                with patch("amplifier_workspace.install._has_sudo", return_value=False):
+                    with patch(
+                        "amplifier_workspace.install._get_arch", return_value="x86_64"
+                    ):
+                        with patch(
+                            "amplifier_workspace.install.Path.home",
+                            return_value=fake_home,
+                        ):
+                            success, _message = _install_lazygit_linux()
+
+        assert success
+        assert (fake_home / ".local" / "bin" / "lazygit").exists()
+
+    def test_install_lazygit_linux_handles_api_error(self):
+        """Returns (False, msg) when urlopen raises an exception."""
+        with patch("urllib.request.urlopen", side_effect=Exception("network error")):
+            with patch("amplifier_workspace.install._get_arch", return_value="x86_64"):
+                success, message = _install_lazygit_linux()
+
+        assert not success
+        msg_lower = message.lower()
+        assert "network error" in msg_lower or "failed" in msg_lower
+
+    def test_install_lazygit_linux_rejects_unknown_arch(self):
+        """Returns (False, msg) for unsupported architectures like mips."""
+        with patch("amplifier_workspace.install._get_arch", return_value="mips"):
+            success, message = _install_lazygit_linux()
+
+        assert not success
+        msg_lower = message.lower()
+        assert "arch" in msg_lower or "unsupported" in msg_lower
