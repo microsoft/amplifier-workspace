@@ -16,6 +16,7 @@ __all__ = [
     "SESSION_NAME_MAX",
     "session_name_from_path",
     "session_exists",
+    "kill_session",
 ]
 
 SESSION_NAME_MAX: int = 32
@@ -56,3 +57,14 @@ def session_exists(name: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def kill_session(name: str) -> None:
+    """Kill a tmux session if it exists.
+
+    Calls session_exists(name) first; if the session is running, calls
+    'tmux kill-session -t <name>' to terminate it. No-op if the session
+    does not exist.
+    """
+    if session_exists(name):
+        subprocess.run(["tmux", "kill-session", "-t", name])
