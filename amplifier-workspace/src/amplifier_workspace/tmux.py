@@ -108,8 +108,10 @@ def _main_rcfile_content(workdir: Path) -> str:
     Amplifier session or starts a fresh one.
 
     Does NOT use 'exec' before amplifier commands so that bash stays alive
-    after amplifier exits — the tmux window remains open instead of closing
-    when amplifier exits normally or on error.
+    after amplifier exits.  After the if/fi block completes, 'exec bash'
+    replaces the rcfile-driven bash with a fresh interactive bash — this
+    guarantees the tmux window stays open and drops to a shell prompt
+    regardless of how amplifier exits (normal exit, crash, or Ctrl-C).
     """
     quoted_workdir = shlex.quote(str(workdir))
     return f"""\
@@ -125,6 +127,7 @@ elif echo "$session_output" | grep -q "Session ID"; then
 else
     amplifier
 fi
+exec bash
 """
 
 

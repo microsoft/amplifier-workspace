@@ -165,6 +165,19 @@ class TestMainRcfileContent:
         result = _main_rcfile_content(Path("/some/path"))
         assert "exec amplifier" not in result
 
+    def test_rcfile_ends_with_exec_bash(self):
+        """The main rcfile ends with 'exec bash' so the window stays open after amplifier exits.
+
+        After the if/fi block completes (amplifier exited for any reason), 'exec bash'
+        replaces the rcfile-driven bash with a fresh interactive bash.  This guarantees
+        the tmux window never closes — the user drops to a shell prompt where they can
+        run 'amplifier resume', update tooling, or do anything else.
+        """
+        result = _main_rcfile_content(Path("/some/path"))
+        assert result.rstrip("\n").endswith("exec bash"), (
+            "rcfile must end with 'exec bash' to keep the tmux window open after amplifier exits"
+        )
+
     def test_workdir_with_spaces_is_quoted(self):
         """Workdir paths containing spaces are safely quoted via shlex.quote."""
         result = _main_rcfile_content(Path("/path/with spaces/project"))
