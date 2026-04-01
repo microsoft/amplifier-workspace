@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .config import CONFIG_PATH, DEFAULT_BUNDLE, DEFAULT_REPOS
-from .config_manager import write_config
+from .config import DEFAULT_BUNDLE, DEFAULT_REPOS
+from .config_manager import CONFIG_PATH, write_config
 
 
 def _prompt(question: str, default: str = "") -> str:
