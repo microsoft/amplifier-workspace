@@ -95,7 +95,7 @@ def _cmd_config(action: str | None, key: str | None, value: str | None) -> None:
 
 def _cmd_list() -> None:
     """Print a placeholder message for the workspace list command."""
-    print("Workspace list not yet tracked (available in Phase 3).")
+    print("Workspace tracking not yet available.")
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +184,19 @@ def main(argv: list[str] | None = None) -> None:
                 _cmd_list()
             return
 
+        _EPILOG = """\
+commands:
+  amplifier-workspace setup          Run the interactive setup wizard
+  amplifier-workspace doctor         Check environment health
+  amplifier-workspace upgrade        Self-update to latest version
+  amplifier-workspace config         Manage configuration (list, get, set, add, remove, reset)
+  amplifier-workspace list           List active workspaces
+"""
         parser = argparse.ArgumentParser(
             prog="amplifier-workspace",
-            description="Bootstrap and launch an Amplifier workspace.",
+            description="Create and manage Amplifier development workspaces.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=_EPILOG,
         )
         parser.add_argument(
             "workdir",

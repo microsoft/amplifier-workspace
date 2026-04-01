@@ -12,6 +12,35 @@ import amplifier_workspace.cli as cli
 
 
 # ---------------------------------------------------------------------------
+# help output
+# ---------------------------------------------------------------------------
+
+
+def test_help_output_includes_all_subcommands(capsys):
+    """Help output lists all subcommands so users can discover them."""
+    with patch.object(sys, "argv", ["amplifier-workspace"]):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit):
+            cli.main()
+
+    captured = capsys.readouterr()
+    help_text = captured.out
+    for subcommand in ("setup", "doctor", "upgrade", "config", "list"):
+        assert subcommand in help_text, f"'{subcommand}' missing from help output"
+
+
+def test_help_output_updated_description(capsys):
+    """Help output uses the user-facing description, not internal bootstrap copy."""
+    with patch.object(sys, "argv", ["amplifier-workspace"]):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit):
+            cli.main()
+
+    captured = capsys.readouterr()
+    assert "Create and manage Amplifier development workspaces." in captured.out
+
+
+# ---------------------------------------------------------------------------
 # setup subcommand
 # ---------------------------------------------------------------------------
 
