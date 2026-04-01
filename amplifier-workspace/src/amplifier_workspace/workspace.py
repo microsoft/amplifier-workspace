@@ -118,15 +118,21 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
 
 
 def _launch_with_tmux(workdir: Path, config: WorkspaceConfig) -> None:
-    """Create a tmux session for *workdir* and attach to it.
+    """Create (or reattach to) a tmux session for *workdir* and attach to it.
 
-    Creates the session via ``tmux.create_session`` then attaches/switches to
-    it via ``tmux.attach_session``.  On POSIX the current process is replaced
-    by tmux; on Windows ``sys.exit`` is called after attach.
+    If the session already exists, reattaches without recreating it.
+    If the session does not exist, creates it then attaches.
+
+    On POSIX, ``tmux.attach_session`` replaces the current process via
+    os.execvp so this function never returns.  On Windows, sys.exit is
+    called after attach.
     """
-    tmux.create_session(workdir, config.tmux)
     name = tmux.session_name_from_path(workdir)
-    tmux.attach_session(name)
+    if tmux.session_exists(name):
+        tmux.attach_session(name)
+    else:
+        tmux.create_session(workdir, config.tmux)
+        tmux.attach_session(name)
 
 
 def _launch_amplifier(workdir: Path) -> None:

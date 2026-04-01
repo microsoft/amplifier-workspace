@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from amplifier_workspace.config import WorkspaceConfig, TmuxConfig
 from amplifier_workspace.workspace import (
+    _launch_with_tmux,
     create_agents_md,
     create_amplifier_settings,
     setup_workspace,
@@ -397,3 +398,91 @@ class TestRunWorkspaceDestroyWithTmux:
         run_workspace(tmp_path, config, destroy=True)
 
         mock_rmtree.assert_called_once_with(tmp_path)
+
+
+class TestLaunchWithTmux:
+    @patch("amplifier_workspace.workspace.tmux.attach_session")
+    @patch("amplifier_workspace.workspace.tmux.create_session")
+    @patch("amplifier_workspace.workspace.tmux.session_exists")
+    @patch("amplifier_workspace.workspace.tmux.session_name_from_path")
+    def test_creates_and_attaches_new_session(
+        self,
+        mock_name,
+        mock_exists,
+        mock_create,
+        mock_attach,
+        tmp_path: Path,
+    ):
+        """When session does not exist, create_session then attach_session are called."""
+        mock_name.return_value = "my-workspace"
+        mock_exists.return_value = False
+        config = WorkspaceConfig()
+        _launch_with_tmux(tmp_path, config)
+        mock_create.assert_called_once_with(tmp_path, config.tmux)
+        mock_attach.assert_called_once_with("my-workspace")
+
+    @patch("amplifier_workspace.workspace.tmux.attach_session")
+    @patch("amplifier_workspace.workspace.tmux.create_session")
+    @patch("amplifier_workspace.workspace.tmux.session_exists")
+    @patch("amplifier_workspace.workspace.tmux.session_name_from_path")
+    def test_reattaches_existing_session_without_create(
+        self,
+        mock_name,
+        mock_exists,
+        mock_create,
+        mock_attach,
+        tmp_path: Path,
+    ):
+        """When session already exists, create_session is NOT called, attach_session IS called."""
+        mock_name.return_value = "my-workspace"
+        mock_exists.return_value = True
+        config = WorkspaceConfig()
+        _launch_with_tmux(tmp_path, config)
+        mock_create.assert_not_called()
+        mock_attach.assert_called_once_with("my-workspace")
+
+    @patch("amplifier_workspace.workspace._launch_with_tmux")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_setup_runs_before_session_launch(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_setup,
+        mock_launch_tmux,
+        tmp_path: Path,
+    ):
+        """setup_workspace is called before _launch_with_tmux when tmux is enabled."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=True))
+
+        call_order: list[str] = []
+        mock_setup.side_effect = lambda *_: call_order.append("setup")
+        mock_launch_tmux.side_effect = lambda *_: call_order.append("launch_tmux")
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config)
+        assert call_order == ["setup", "launch_tmux"]
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace._launch_with_tmux")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_tier1_fallback_when_tmux_disabled(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_setup,
+        mock_launch_tmux,
+        mock_launch_amplifier,
+        tmp_path: Path,
+    ):
+        """When tmux is disabled, _launch_amplifier (tier 1) is called instead of _launch_with_tmux."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig(tmux=TmuxConfig(enabled=False))
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config)
+        mock_launch_amplifier.assert_called_once()
+        mock_launch_tmux.assert_not_called()
