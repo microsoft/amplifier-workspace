@@ -1,5 +1,6 @@
 """Tests for doctor.py: _print_check helper and always-run health checks."""
 
+import contextlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -84,6 +85,9 @@ class TestRunDoctor:
         mock_config = MagicMock()
         mock_config.default_repos = ["https://github.com/example/repo.git"]
         mock_config.agents_template = agents_template
+        # TODO Task 7: tmux.enabled is not yet read by run_doctor; Task 7 will add
+        # the conditional check so that the tmux row shows active or skipped based
+        # on this flag. For now, run_doctor always prints "tmux session (skipped)".
         mock_config.tmux.enabled = False
 
         available = set()
@@ -103,32 +107,46 @@ class TestRunDoctor:
             "mock_config_path": mock_config_path,
         }
 
+    def _apply_patches(self, params):
+        """Return a contextlib.ExitStack with all standard doctor patches applied."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(
+            patch(
+                "amplifier_workspace.doctor._get_install_info_for_doctor",
+                return_value=params["install_info"],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "amplifier_workspace.doctor._check_for_update_doctor",
+                return_value=params["update_result"],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "amplifier_workspace.doctor.shutil.which",
+                side_effect=params["which_side_effect"],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "amplifier_workspace.doctor.load_config",
+                return_value=params["mock_config"],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "amplifier_workspace.doctor.CONFIG_PATH",
+                params["mock_config_path"],
+            )
+        )
+        return stack
+
     def test_prints_python_version(self, capsys):
         """run_doctor prints Python version information."""
         params = self._default_patches()
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             run_doctor()
 
         captured = capsys.readouterr()
@@ -139,28 +157,7 @@ class TestRunDoctor:
         """run_doctor returns 0 (all pass) when git is found in PATH."""
         params = self._default_patches(git_available=True)
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             exit_code = run_doctor()
 
         assert exit_code == 0
@@ -169,28 +166,7 @@ class TestRunDoctor:
         """run_doctor returns 1 when git is not found in PATH."""
         params = self._default_patches(git_available=False)
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             exit_code = run_doctor()
 
         assert exit_code == 1
@@ -203,28 +179,7 @@ class TestRunDoctor:
             config_exists=True,
         )
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             exit_code = run_doctor()
 
         assert exit_code == 0
@@ -235,28 +190,7 @@ class TestRunDoctor:
         """run_doctor returns 1 when config file does not exist."""
         params = self._default_patches(config_exists=False)
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             exit_code = run_doctor()
 
         assert exit_code == 1
@@ -267,28 +201,7 @@ class TestRunDoctor:
         """run_doctor returns 1 when agents_template is set but file doesn't exist."""
         params = self._default_patches(agents_template="/nonexistent/template.yaml")
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             exit_code = run_doctor()
 
         assert exit_code == 1
@@ -298,28 +211,7 @@ class TestRunDoctor:
         params = self._default_patches()
         params["update_result"] = (True, "update available (abcd1234 → efgh5678)")
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             exit_code = run_doctor()
 
         assert exit_code == 0
@@ -328,28 +220,7 @@ class TestRunDoctor:
         """run_doctor shows tmux check as skipped when tmux.enabled is False."""
         params = self._default_patches()
 
-        with (
-            patch(
-                "amplifier_workspace.doctor._get_install_info_for_doctor",
-                return_value=params["install_info"],
-            ),
-            patch(
-                "amplifier_workspace.doctor._check_for_update_doctor",
-                return_value=params["update_result"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.shutil.which",
-                side_effect=params["which_side_effect"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.load_config",
-                return_value=params["mock_config"],
-            ),
-            patch(
-                "amplifier_workspace.doctor.CONFIG_PATH",
-                params["mock_config_path"],
-            ),
-        ):
+        with self._apply_patches(params):
             run_doctor()
 
         captured = capsys.readouterr()

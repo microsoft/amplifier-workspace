@@ -48,16 +48,12 @@ def _print_check(label: str, passed: bool | None, detail: str = "") -> None:
     - passed=False → '  ✗  label  detail'  (red)
     - passed=None  → '  -  label (skipped)'
     """
-    if passed is True:
-        symbol = _CHECK
-        suffix = f"  {detail}" if detail else ""
-        print(f"  {symbol}  {label}{suffix}")
-    elif passed is False:
-        symbol = _FAIL
-        suffix = f"  {detail}" if detail else ""
-        print(f"  {symbol}  {label}{suffix}")
-    else:
+    if passed is None:
         print(f"  {_SKIP}  {label} (skipped)")
+    else:
+        symbol = _CHECK if passed else _FAIL
+        suffix = f"  {detail}" if detail else ""
+        print(f"  {symbol}  {label}{suffix}")
 
 
 # ── Main health-check runner ──────────────────────────────────────────────────
