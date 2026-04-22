@@ -1,84 +1,77 @@
-# Amplifier Development Workspace
+# Development Workspace
 
-This is a **temporary working repository** for cross-repo Amplifier development.
+A **temporary working repository** for cross-repo development. Created fresh for a task; destroyed when complete.
 
-## Session Approach
+## THE RULES
 
-This workspace was created for a **specific task** and will be **destroyed when complete**. The pattern:
-1. Workspace spun up fresh for a task (already done)
-2. Work happens here — committing and pushing to submodule repos
-3. Workspace destroyed when done (nothing in the root directory persists)
+**Invariant:** Every repo in this workspace lives as a **subdirectory of cwd** with its own `.git` — either a submodule (remote exists) or a local-only git repo (pre-publish). The workspace root is **never** the root of any project's source tree.
 
-Each task gets a clean slate. Don't store anything important in this root directory.
+| User says… | You do (exactly this) |
+|---|---|
+| "pull down X", "get X", "clone X", "add X" | `git submodule add <url>` in cwd |
+| "start a new project X", "let's build X" (no repo yet) | `mkdir X && cd X && git init` — all new code goes inside this subdir |
+| "publish X" / "push X to github" (local-only project) | From inside the subdir: `gh repo create --source=. --push` |
+
+**Forbidden — no matter how convenient it seems:**
+
+- ❌ `git clone <url>` or `gh repo clone <url>` for adding a repo to this workspace — use `git submodule add` instead
+- ❌ Using an existing checkout elsewhere on the filesystem (e.g. `~/repos/X/`, `../X/`). The **"helpful reuse"** anti-pattern: edits land in the wrong checkout and versions drift.
+- ❌ Scanning parent directories or `~/` looking for existing clones to reuse
+- ❌ Creating **new-project source** (code/configs meant to become a published repo) at the workspace root. The **"workspace-as-project-root"** anti-pattern: when you later "publish this," the workspace scraps, submodule refs, and `SCRATCH.md` end up in your project's initial commit. Persistent new-project code goes in a subdir (see table above). *Ephemeral* files at the root are fine — see next section.
+- ❌ Committing new-project code to the workspace git — it's throwaway. New-project code belongs in the subdir's own git.
+
+**Why:** The workspace is destroyed at session end. Self-containment is what makes destruction safe. Edits outside cwd, or persistent project code mingled with workspace scraps, cause lost work or polluted initial commits.
+
+## What the Workspace Root IS For
+
+The root is the right place for **anything ephemeral that doesn't need to survive session end**:
+
+- Throwaway scripts and experiments
+- Temporary files for the user to inspect, hand off, or reuse in-session
+- Cross-repo scratch work — exploration, comparisons, notes that don't belong to any single repo
+- Planning docs, design drafts, announcement copy that serve their purpose this session and aren't meant for a repo
+- Output of analysis or investigation runs
+
+**Rule of thumb:** If it doesn't need to persist past workspace destruction, the root is fine. If it does, it goes in a subdir (submodule or local git) — no exceptions.
+
+Feel free to use the root liberally for this category of work. The constraint is *persistence*, not *file creation*.
+
+## Session Lifecycle
+
+1. Workspace spun up fresh (already done)
+2. Work happens in subdirs for anything that persists; root is free for ephemeral cross-repo work
+3. Workspace destroyed when done. The root directory does not persist.
+
+Don't store anything that needs **long-term persistance** in the root directory.
 
 ## Working Memory
 
 @SCRATCH.md
 
-Create `SCRATCH.md` in this directory as your working memory:
-- **What it is**: A scratchpad for plans, important facts, decisions, and current state
-- **Purpose**: Drives what to do next, not just a log of what was done
-- **Loaded every turn**: The @-mention above injects it into every request
-- **Keep it bounded**: Actively prune outdated info, remove completed items, consolidate
-- **Keep it focused**: Only retain what's needed for remaining work — working memory, not an archive
+Create `SCRATCH.md` at the workspace root as your working memory:
+- Plans, important facts, decisions, current state
+- Drives what to do **next** — not a log of what was done
+- Loaded every turn via the @-mention above
+- Keep bounded: prune outdated info, consolidate, focus on remaining work
 
-## Workspace Structure
+## Layout
 
-This git repo exists locally only (not pushed anywhere) and contains:
+The workspace root holds `AGENTS.md`, `SCRATCH.md`, tool config directories, subdirectories (one per repo), and any ephemeral scratch files. Each subdirectory is its own git repo.
 
 ```
-./                               # Temporary workspace (local git, throwaway)
-├── AGENTS.md                    # This file — workspace context
-├── SCRATCH.md                   # Working memory (create after intent established)
-├── .amplifier/
-│   └── settings.yaml            # Amplifier bundle configuration
-├── amplifier/                   # submodule: microsoft/amplifier
-├── amplifier-core/              # submodule: microsoft/amplifier-core
-├── amplifier-foundation/        # submodule: microsoft/amplifier-foundation
-└── [additional submodules]      # Added as needed during work
+./
+├── AGENTS.md              # this file
+├── SCRATCH.md             # working memory
+├── <submodule-repo>/      # existing repo added via `git submodule add`
+├── <local-project>/       # new work, `git init` inside, publish later
+└── <ephemeral stuff>      # scripts, notes, temp files — fine at root
 ```
 
-## Git Workflow
+## Publishing a Local-Only Project
 
-**This workspace repo:**
-- Local only, never pushed anywhere
-- Use however you see fit (commits, branches, whatever helps)
-- Will be destroyed at session end
+When a project subdir is ready to ship:
+1. From inside the subdir: `gh repo create --source=. --public --push` (or `--private`)
+2. The subdir is now a remote-backed repo — work continues normally
+3. In later sessions, the repo can be re-added as a proper submodule: `git submodule add <url>`
 
-**Submodule repos:**
-- These ARE real repos pushed to GitHub
-- Commit and push your work to these
-- Changes here persist beyond the session
-
-**Adding new repos:** When you need content from another Amplifier repo, add it as a submodule:
-```bash
-git submodule add https://github.com/microsoft/amplifier-module-xyz.git
-```
-
-**Updating submodules:**
-```bash
-git submodule update --remote --merge              # all submodules
-git submodule update --remote --merge amplifier-core  # single submodule
-```
-
-## Key Repos Reference
-
-| Directory | Repo | Purpose |
-|-----------|------|---------|
-| @amplifier/ | [microsoft/amplifier](https://github.com/microsoft/amplifier) | Entry point, docs, getting started |
-| @amplifier-core/ | [microsoft/amplifier-core](https://github.com/microsoft/amplifier-core) | Kernel — tiny, stable, boring |
-| @amplifier-foundation/ | [microsoft/amplifier-foundation](https://github.com/microsoft/amplifier-foundation) | Bundles, behaviors, libraries |
-
-## For More Context
-
-- @amplifier/docs/MODULES.md — Full module ecosystem and repo locations
-- @amplifier/docs/REPOSITORY_RULES.md — Repo boundaries and conventions
-
-## Notes for Agents
-
-1. **Read this file first** to understand the workspace layout.
-2. **Use `SCRATCH.md`** for ephemeral notes — do not litter the workspace with temporary files.
-3. **Submodule directories** contain the full source of each repository. Navigate into them normally.
-4. **Edits belong in submodules**, not in `~/.amplifier/cache/` — edit the source directly.
-5. **Do not commit directly** to submodule directories unless you intend to push upstream.
-6. **Check `.amplifier/settings.yaml`** for the active bundle and provider configuration.
+**Warning:** A local-only subdir is lost when the workspace is destroyed. Publish (or back up) before destroying.
