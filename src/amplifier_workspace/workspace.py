@@ -90,8 +90,9 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
 
     If *workdir* is not yet a git repository:
     - Initialise the repo.
-    - Add configured repos as submodules.
-    - Checkout submodules if any repos were specified.
+    - Add configured repos as submodules (each with ``--branch main`` tracking).
+    - Pull every submodule to the latest remote main via ``git submodule update
+      --remote --merge``.
     - Create an initial commit.
 
     Always (idempotently):
@@ -106,7 +107,7 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
         for url in config.default_repos:
             _git.add_submodule(workdir, url)
         if config.default_repos:
-            _git.checkout_submodules(workdir)
+            _git.update_submodules(workdir)
         create_agents_md(workdir, config)
         create_amplifier_settings(workdir, config)
         _git.initial_commit(workdir, "chore: initialise workspace")
@@ -114,6 +115,20 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
     # Always run idempotently for existing workspaces (no-op if files already exist)
     create_agents_md(workdir, config)
     create_amplifier_settings(workdir, config)
+
+
+def update_workspace(workdir: Path) -> None:
+    """Pull all submodules in *workdir* to their latest remote main.
+
+    Raises ``ValueError`` if *workdir* is not a git repository.
+
+    Safe to call on an already-current workspace — submodules that are
+    already at the latest upstream commit are left untouched.
+    """
+    if not _git.is_git_repo(workdir):
+        raise ValueError(f"{workdir} is not a git repository")
+    _git.update_submodules(workdir)
+    print(f"Updated submodules in {workdir.name}")
 
 
 # ---------------------------------------------------------------------------
