@@ -110,12 +110,12 @@ class TestSetupWorkspace:
         assert mock_git.add_submodule.call_count == len(config.default_repos)
 
     @patch("amplifier_workspace.workspace._git")
-    def test_checkouts_submodules_after_adding(self, mock_git, tmp_path: Path):
-        """Calls checkout_submodules with workdir after adding submodules."""
+    def test_update_submodules_called_after_adding(self, mock_git, tmp_path: Path):
+        """Calls update_submodules with workdir after adding submodules (replaces checkout)."""
         mock_git.is_git_repo.return_value = False
         config = WorkspaceConfig()
         setup_workspace(tmp_path, config)
-        mock_git.checkout_submodules.assert_called_once_with(tmp_path)
+        mock_git.update_submodules.assert_called_once_with(tmp_path)
 
     @patch("amplifier_workspace.workspace._git")
     def test_creates_initial_commit(self, mock_git, tmp_path: Path):
@@ -512,3 +512,49 @@ class TestLaunchWithTmux:
         run_workspace(tmp_path, config)
         mock_launch_amplifier.assert_called_once()
         mock_launch_tmux.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# New tests for update_submodules in setup_workspace and update_workspace
+# (TDD: written before implementation)
+# ---------------------------------------------------------------------------
+
+from amplifier_workspace.workspace import update_workspace
+
+
+class TestSetupWorkspaceUpdateSubmodules:
+    """setup_workspace must call update_submodules (not checkout_submodules) for new repos."""
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_update_submodules_called_on_new_repo(self, mock_git, tmp_path: Path):
+        """setup_workspace calls update_submodules when default repos exist."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        mock_git.update_submodules.assert_called_once_with(tmp_path)
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_update_submodules_not_called_when_no_repos(self, mock_git, tmp_path: Path):
+        """setup_workspace skips update_submodules when default_repos is empty."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig(default_repos=[])
+        setup_workspace(tmp_path, config)
+        mock_git.update_submodules.assert_not_called()
+
+
+class TestUpdateWorkspace:
+    """update_workspace pulls all submodules to latest remote main."""
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_calls_update_submodules(self, mock_git, tmp_path: Path):
+        """update_workspace delegates to _git.update_submodules."""
+        mock_git.is_git_repo.return_value = True
+        update_workspace(tmp_path)
+        mock_git.update_submodules.assert_called_once_with(tmp_path)
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_raises_if_not_a_git_repo(self, mock_git, tmp_path: Path):
+        """update_workspace raises ValueError when workdir is not a git repo."""
+        mock_git.is_git_repo.return_value = False
+        with pytest.raises(ValueError, match="not a git repository"):
+            update_workspace(tmp_path)

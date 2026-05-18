@@ -8,7 +8,7 @@ from pathlib import Path
 
 from amplifier_workspace.config import load_config
 
-_SUBCOMMANDS = ("doctor", "upgrade", "setup", "config", "list")
+_SUBCOMMANDS = ("doctor", "upgrade", "setup", "config", "list", "update")
 
 
 def _confirm_destroy(workdir: Path) -> None:
@@ -98,6 +98,13 @@ def _cmd_list() -> None:
     print("Workspace list not yet tracked (available in Phase 3).")
 
 
+def _cmd_update(workdir: Path) -> None:
+    """Pull all submodules in *workdir* to their latest remote main."""
+    from amplifier_workspace.workspace import update_workspace  # noqa: PLC0415
+
+    update_workspace(workdir)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -166,6 +173,22 @@ def main(argv: list[str] | None = None) -> None:
             # list — no extra args
             subparsers.add_parser("list", help="List workspaces.")
 
+            # update — optional workdir (defaults to cwd)
+            update_p = subparsers.add_parser(
+                "update",
+                help="Pull all submodules to their latest remote main.",
+            )
+            update_p.add_argument(
+                "workdir",
+                nargs="?",
+                type=Path,
+                default=None,
+                help=(
+                    "Path to the workspace directory. "
+                    "Defaults to the current working directory."
+                ),
+            )
+
             args = sub_parser.parse_args()
 
             if args.command == "setup":
@@ -182,6 +205,13 @@ def main(argv: list[str] | None = None) -> None:
                 )
             elif args.command == "list":
                 _cmd_list()
+            elif args.command == "update":
+                workdir = (
+                    Path(args.workdir).expanduser().resolve()
+                    if args.workdir is not None
+                    else Path.cwd()
+                )
+                _cmd_update(workdir)
             return
 
         parser = argparse.ArgumentParser(

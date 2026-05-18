@@ -70,20 +70,40 @@ def init_repo(path: Path) -> None:
 
 
 def add_submodule(repo_path: Path, url: str) -> None:
-    """Add *url* as a git submodule inside *repo_path*.
+    """Add *url* as a git submodule inside *repo_path*, tracking the main branch.
+
+    Passes ``--branch main`` so the submodule records a tracking branch in
+    ``.gitmodules``, which allows ``git submodule update --remote`` to pull
+    the latest upstream main reliably.
 
     No-op if a directory with the inferred repository name already exists.
     """
     name = repo_name_from_url(url)
     if (repo_path / name).exists():
         return
-    _run(["git", "submodule", "add", url], cwd=repo_path)
+    _run(["git", "submodule", "add", "--branch", "main", url], cwd=repo_path)
 
 
 def checkout_submodules(repo_path: Path) -> None:
     """Check out the main (or master) branch in every registered submodule."""
     _run(
         ["git", "submodule", "foreach", "git checkout main || git checkout master"],
+        cwd=repo_path,
+    )
+
+
+def update_submodules(repo_path: Path) -> None:
+    """Pull every submodule to the latest commit on its tracking remote branch.
+
+    Runs ``git submodule update --remote --merge``, which fetches the remote
+    tracking branch (set by ``--branch main`` at add time) and merges the
+    latest commit into the submodule's working tree.
+
+    Safe to call on an already-current workspace — no-op when there are no
+    new upstream commits.
+    """
+    _run(
+        ["git", "submodule", "update", "--remote", "--merge"],
         cwd=repo_path,
     )
 

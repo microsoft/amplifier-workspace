@@ -156,3 +156,27 @@ class TestCliKillFlag:
         mock_rw.assert_called_once()
         call_args, _ = mock_rw.call_args
         assert call_args[0] == tmp_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# update subcommand (TDD: written before implementation)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_update_calls_update_workspace(tmp_path):
+    """'update <workdir>' subcommand calls update_workspace with resolved path."""
+    with patch.object(sys, "argv", ["amplifier-workspace", "update", str(tmp_path)]):
+        with patch("amplifier_workspace.workspace.update_workspace") as mock_update:
+            importlib.reload(cli)
+            cli.main()
+    mock_update.assert_called_once_with(tmp_path.resolve())
+
+
+def test_cli_update_defaults_to_cwd(monkeypatch, tmp_path):
+    """'update' with no workdir argument defaults to the current working directory."""
+    monkeypatch.chdir(tmp_path)
+    with patch.object(sys, "argv", ["amplifier-workspace", "update"]):
+        with patch("amplifier_workspace.workspace.update_workspace") as mock_update:
+            importlib.reload(cli)
+            cli.main()
+    mock_update.assert_called_once_with(tmp_path.resolve())

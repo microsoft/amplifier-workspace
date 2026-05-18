@@ -11,6 +11,7 @@ from amplifier_workspace.git import (
     initial_commit,
     is_git_repo,
     repo_name_from_url,
+    update_submodules,
 )
 
 
@@ -87,7 +88,10 @@ class TestAddSubmodule:
         with patch("subprocess.run") as mock_run:
             add_submodule(tmp_path, url)
         mock_run.assert_called_once_with(
-            ["git", "submodule", "add", url], cwd=tmp_path, check=True, capture_output=True
+            ["git", "submodule", "add", "--branch", "main", url],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
         )
 
     def test_skips_if_directory_exists(self, tmp_path: Path):
@@ -132,3 +136,48 @@ class TestInitialCommit:
             call(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True),
             call(["git", "commit", "-m", message], cwd=tmp_path, check=True, capture_output=True),
         ]
+
+
+# ---------------------------------------------------------------------------
+# New tests for --branch main and update_submodules (TDD: written before impl)
+# ---------------------------------------------------------------------------
+
+
+class TestAddSubmoduleWithBranchFlag:
+    """add_submodule must pass --branch main so submodules track upstream."""
+
+    def test_includes_branch_main_flag(self, tmp_path: Path):
+        """--branch main must appear in the git submodule add command."""
+        url = "https://github.com/org/my-repo.git"
+        with patch("subprocess.run") as mock_run:
+            add_submodule(tmp_path, url)
+        cmd = mock_run.call_args.args[0]
+        assert "--branch" in cmd, "Expected --branch flag in git submodule add command"
+        assert "main" in cmd, "Expected 'main' value after --branch flag"
+
+    def test_full_command_with_branch_main(self, tmp_path: Path):
+        """Full command must be git submodule add --branch main <url>."""
+        url = "https://github.com/org/my-repo.git"
+        with patch("subprocess.run") as mock_run:
+            add_submodule(tmp_path, url)
+        mock_run.assert_called_once_with(
+            ["git", "submodule", "add", "--branch", "main", url],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+
+class TestUpdateSubmodules:
+    """update_submodules pulls every submodule to the latest remote main."""
+
+    def test_calls_git_submodule_update_remote_merge(self, tmp_path: Path):
+        """Must run git submodule update --remote --merge."""
+        with patch("subprocess.run") as mock_run:
+            update_submodules(tmp_path)
+        mock_run.assert_called_once_with(
+            ["git", "submodule", "update", "--remote", "--merge"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
