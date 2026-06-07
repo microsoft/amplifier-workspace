@@ -33,6 +33,20 @@ _DEFAULT_WINDOWS: dict[str, str] = {
 class TmuxConfig:
     enabled: bool = False
     windows: dict[str, str] = field(default_factory=lambda: dict(_DEFAULT_WINDOWS))
+    # Session-scoped mouse mode: enables scroll-wheel history and drag-select.
+    # Applied via `tmux set-option -t <session>` so it never touches the user's
+    # ~/.tmux.conf or any other running session. Requires tmux >= 2.1.
+    mouse: bool = True
+    # Session-scoped `set-clipboard on`: makes tmux's default MouseDragEnd
+    # copy-and-cancel emit the selection to the terminal via OSC-52, fixing the
+    # stuck copy-mode highlight and copying to the system clipboard on
+    # OSC-52-capable terminals (iTerm2, kitty, wezterm, Ghostty, etc.).
+    set_clipboard: bool = True
+    # OPT-IN ONLY. Bind copy-mode MouseDragEnd to pipe the selection to an OS
+    # clipboard tool (pbcopy/wl-copy/xclip/xsel) for terminals that lack OSC-52
+    # (e.g. Apple Terminal.app). WARNING: tmux key bindings are server-global, so
+    # this binding leaks into the user's other tmux sessions. Off by default.
+    clipboard_binding: bool = False
 
 
 @dataclass
@@ -87,6 +101,9 @@ def load_config(config_path: Path | None = None) -> WorkspaceConfig:
     tmux_cfg = TmuxConfig(
         enabled=tmux_section.get("enabled", False),
         windows=tmux_windows,
+        mouse=tmux_section.get("mouse", True),
+        set_clipboard=tmux_section.get("set_clipboard", True),
+        clipboard_binding=tmux_section.get("clipboard_binding", False),
     )
 
     return WorkspaceConfig(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -184,6 +185,142 @@ def _write_rcfiles(
     return rcfile_base
 
 
+# Cross-platform clipboard tools, in preference order. Each entry is
+# (binary_to_probe, full_command). First one found wins.
+_CLIPBOARD_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("pbcopy", "pbcopy"),  # macOS
+    ("wl-copy", "wl-copy"),  # Wayland
+    ("xclip", "xclip -selection clipboard"),  # X11
+    ("xsel", "xsel -ib"),  # X11
+)
+
+
+def _tmux_version() -> tuple[int, int] | None:
+    """Return tmux's (major, minor) version, or None if it can't be determined.
+
+    Parses output like ``tmux 3.3a`` or ``tmux next-3.4``. Mirrors the version
+    parsing style used by doctor.py so behavior is consistent across the tool.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "-V"], capture_output=True, text=True, timeout=5
+        )
+        match = re.search(r"(\d+)\.(\d+)", result.stdout or "")
+        if not match:
+            return None
+        return int(match.group(1)), int(match.group(2))
+    except Exception:  # tmux missing, non-string stdout (mocks), parse error, etc.
+        return None
+
+
+def _resolve_clipboard_command() -> str | None:
+    """Return the first available OS clipboard command, or None if none found."""
+    for binary, command in _CLIPBOARD_COMMANDS:
+        if shutil.which(binary):
+            return command
+    return None
+
+
+def _set_option(name: str, option: str, value: str) -> None:
+    """Run ``tmux set-option -t <name> <option> <value>``; never raises.
+
+    Session-scoped: the ``-t <name>`` target means this affects ONLY this
+    session, never the user's global config or other running sessions. A failure
+    here must not abort session creation — the windows matter more than mouse
+    mode — so all errors are logged to stderr and swallowed.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "set-option", "-t", name, option, value],
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:  # tmux missing, OSError, etc.
+        print(
+            f"amplifier-workspace: could not set tmux option '{option}': {exc}",
+            file=sys.stderr,
+        )
+        return
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        print(
+            f"amplifier-workspace: tmux set-option {option} {value} failed"
+            + (f": {detail}" if detail else ""),
+            file=sys.stderr,
+        )
+
+
+def _apply_clipboard_binding(name: str) -> None:
+    """Bind copy-mode MouseDragEnd to pipe the selection to the OS clipboard.
+
+    OPT-IN ONLY (config.clipboard_binding). WARNING: tmux key bindings are
+    SERVER-GLOBAL — this binding leaks into the user's other tmux sessions and
+    persists for the tmux server's lifetime. It exists only for terminals that
+    lack OSC-52 support (e.g. Apple Terminal.app). Failures are non-fatal.
+    """
+    command = _resolve_clipboard_command()
+    if command is None:
+        print(
+            "amplifier-workspace: clipboard_binding enabled but no clipboard tool "
+            "found (pbcopy/wl-copy/xclip/xsel); skipping binding",
+            file=sys.stderr,
+        )
+        return
+    for table in ("copy-mode", "copy-mode-vi"):
+        try:
+            subprocess.run(
+                [
+                    "tmux",
+                    "bind-key",
+                    "-T",
+                    table,
+                    "MouseDragEnd1Pane",
+                    "send-keys",
+                    "-X",
+                    "copy-pipe-and-cancel",
+                    command,
+                ],
+                capture_output=True,
+                text=True,
+            )
+        except Exception as exc:
+            print(
+                f"amplifier-workspace: could not bind clipboard in {table}: {exc}",
+                file=sys.stderr,
+            )
+
+
+def _apply_session_options(name: str, config: "TmuxConfig") -> None:
+    """Apply session-scoped mouse + clipboard options to a freshly-created session.
+
+    All options are set with ``set-option -t <name>`` (session scope) so they
+    NEVER modify the user's ~/.tmux.conf or any other running tmux session.
+    Everything here is best-effort: option/binding failures are logged but do not
+    abort session creation.
+    """
+    if config.mouse:
+        # `mouse on` requires tmux >= 2.1. Older tmux uses the legacy
+        # mode-mouse/mouse-* options; rather than guess, skip gracefully.
+        version = _tmux_version()
+        if version is not None and version < (2, 1):
+            print(
+                f"amplifier-workspace: tmux {version[0]}.{version[1]} < 2.1 — "
+                "skipping 'mouse on' (mouse mode unavailable on this tmux)",
+                file=sys.stderr,
+            )
+        else:
+            _set_option(name, "mouse", "on")
+
+    if config.set_clipboard:
+        # set-clipboard makes tmux's default MouseDragEnd copy-and-cancel emit the
+        # selection via OSC-52 — fixes the stuck highlight and system-clipboard
+        # copy on OSC-52-capable terminals, with no global key-table changes.
+        _set_option(name, "set-clipboard", "on")
+
+    if config.clipboard_binding:
+        _apply_clipboard_binding(name)
+
+
 def create_session(workdir: Path, config: "TmuxConfig") -> None:
     """Create a new tmux session for the given workspace directory.
 
@@ -216,6 +353,12 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
         ],
         check=True,
     )
+
+    # 1b) Apply session-scoped mouse + clipboard options immediately after the
+    # session exists. These use `set-option -t <name>`, so they affect ONLY this
+    # session — the user's ~/.tmux.conf and other tmux sessions are untouched.
+    # Best-effort: failures here never abort session creation.
+    _apply_session_options(name, config)
 
     # 2) Shell window (second, if configured) — create window then add a second pane via horizontal split
     if "shell" in config.windows:

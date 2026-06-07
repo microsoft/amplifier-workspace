@@ -9,6 +9,16 @@ agents_template = ""
 
 [tmux]
 enabled = false
+# Session-scoped mouse mode: scroll-wheel history + drag-select. Applied only to
+# this session (never touches your ~/.tmux.conf or other tmux sessions).
+mouse = true
+# Emit selections to the terminal via OSC-52 so drag-select copies to the system
+# clipboard and the copy-mode highlight clears (iTerm2, kitty, wezterm, Ghostty…).
+set_clipboard = true
+# OPT-IN: bind drag-end to an OS clipboard tool (pbcopy/wl-copy/xclip/xsel) for
+# terminals lacking OSC-52 (e.g. Apple Terminal.app). WARNING: tmux key bindings
+# are server-global and will affect your other tmux sessions. Default: false.
+# clipboard_binding = false
 
 [tmux.windows]
 amplifier = ""

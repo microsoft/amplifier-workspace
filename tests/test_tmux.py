@@ -554,3 +554,274 @@ class TestAttachSession:
         cmd_inside = args_inside[1]
         t_index = cmd_inside.index("-t")
         assert cmd_inside[t_index + 1] == "target-session"
+
+
+def _set_option_cmds(mock_run):
+    """Return the command lists for every `tmux set-option` call recorded."""
+    return [
+        c.args[0]
+        for c in mock_run.call_args_list
+        if len(c.args) and "set-option" in c.args[0]
+    ]
+
+
+class TestSessionScopedOptions:
+    """Tests for session-scoped mouse + clipboard options (Task: tmux scroll/copy)."""
+
+    def test_mouse_and_set_clipboard_applied_when_enabled(self, tmp_path):
+        """create_session issues session-scoped `mouse on` and `set-clipboard on`."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""}, mouse=True, set_clipboard=True)
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        set_cmds = _set_option_cmds(mock_run)
+        # mouse on, session-scoped to this session's name
+        assert any(
+            "mouse" in cmd and "on" in cmd and "-t" in cmd and "myproject" in cmd
+            for cmd in set_cmds
+        ), f"expected `set-option -t myproject mouse on`, got {set_cmds}"
+        # set-clipboard on, session-scoped
+        assert any(
+            "set-clipboard" in cmd and "on" in cmd and "myproject" in cmd
+            for cmd in set_cmds
+        ), f"expected `set-option -t myproject set-clipboard on`, got {set_cmds}"
+
+    def test_no_options_applied_when_flags_false(self, tmp_path):
+        """When both flags are False, no `set-option` calls are issued."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""}, mouse=False, set_clipboard=False)
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        assert _set_option_cmds(mock_run) == []
+
+    def test_mouse_only(self, tmp_path):
+        """mouse=True, set_clipboard=False issues only the mouse option."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""}, mouse=True, set_clipboard=False)
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        set_cmds = _set_option_cmds(mock_run)
+        assert any("mouse" in cmd for cmd in set_cmds)
+        assert not any("set-clipboard" in cmd for cmd in set_cmds)
+
+    def test_old_tmux_skips_mouse_but_keeps_clipboard(self, tmp_path):
+        """On tmux < 2.1, `mouse on` is skipped but `set-clipboard on` still applies."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""}, mouse=True, set_clipboard=True)
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(2, 0)),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        set_cmds = _set_option_cmds(mock_run)
+        assert not any("mouse" in cmd for cmd in set_cmds), (
+            "mouse should be skipped on tmux < 2.1"
+        )
+        assert any("set-clipboard" in cmd for cmd in set_cmds)
+
+    def test_unknown_tmux_version_still_applies_mouse(self, tmp_path):
+        """When the tmux version can't be determined, mouse is applied (best effort)."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""}, mouse=True, set_clipboard=False)
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=None),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        assert any("mouse" in cmd for cmd in _set_option_cmds(mock_run))
+
+    def test_set_option_failure_does_not_abort_session(self, tmp_path):
+        """A failing set-option must not abort create_session — windows still complete."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""}, mouse=True, set_clipboard=True)
+
+        def run_side_effect(cmd, *args, **kwargs):
+            if "set-option" in cmd:
+                raise OSError("simulated set-option failure")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch(
+                "amplifier_workspace.tmux.subprocess.run",
+                side_effect=run_side_effect,
+            ) as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            # Must not raise despite the set-option failure
+            create_session(workdir, config)
+
+        # The final select-window call must still have happened
+        last_cmd = mock_run.call_args_list[-1].args[0]
+        assert "select-window" in last_cmd
+
+    def test_no_clipboard_binding_by_default(self, tmp_path):
+        """clipboard_binding defaults off — no global `bind-key` calls are issued."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(windows={"amplifier": ""})
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        bind_cmds = [
+            c.args[0]
+            for c in mock_run.call_args_list
+            if len(c.args) and "bind-key" in c.args[0]
+        ]
+        assert bind_cmds == []
+
+    def test_clipboard_binding_opt_in_issues_global_bindings(self, tmp_path):
+        """With clipboard_binding=True and a resolvable tool, bind-key calls are issued."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(
+            windows={"amplifier": ""},
+            mouse=False,
+            set_clipboard=False,
+            clipboard_binding=True,
+        )
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch(
+                "amplifier_workspace.tmux._resolve_clipboard_command",
+                return_value="pbcopy",
+            ),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        bind_cmds = [
+            c.args[0]
+            for c in mock_run.call_args_list
+            if len(c.args) and "bind-key" in c.args[0]
+        ]
+        assert bind_cmds, (
+            "expected at least one bind-key call when clipboard_binding=True"
+        )
+        assert any("copy-mode-vi" in cmd for cmd in bind_cmds)
+        assert all("pbcopy" in cmd for cmd in bind_cmds)
+
+    def test_clipboard_binding_missing_tool_is_noop(self, tmp_path):
+        """clipboard_binding=True but no clipboard tool found → no bind-key, no crash."""
+        workdir = tmp_path / "myproject"
+        config = TmuxConfig(
+            windows={"amplifier": ""},
+            clipboard_binding=True,
+        )
+        with (
+            patch("amplifier_workspace.tmux._write_rcfiles") as mock_rcfiles,
+            patch("amplifier_workspace.tmux._tmux_version", return_value=(3, 3)),
+            patch(
+                "amplifier_workspace.tmux._resolve_clipboard_command",
+                return_value=None,
+            ),
+            patch("amplifier_workspace.tmux.subprocess.run") as mock_run,
+        ):
+            mock_rcfiles.return_value = Path("/tmp/rcfiles")
+            create_session(workdir, config)
+
+        bind_cmds = [
+            c.args[0]
+            for c in mock_run.call_args_list
+            if len(c.args) and "bind-key" in c.args[0]
+        ]
+        assert bind_cmds == []
+
+
+class TestTmuxVersion:
+    """Tests for the _tmux_version parser."""
+
+    def test_parses_standard_version(self):
+        from amplifier_workspace.tmux import _tmux_version
+
+        with patch(
+            "amplifier_workspace.tmux.subprocess.run",
+            return_value=MagicMock(stdout="tmux 3.3a\n"),
+        ):
+            assert _tmux_version() == (3, 3)
+
+    def test_parses_next_version(self):
+        from amplifier_workspace.tmux import _tmux_version
+
+        with patch(
+            "amplifier_workspace.tmux.subprocess.run",
+            return_value=MagicMock(stdout="tmux next-3.4\n"),
+        ):
+            assert _tmux_version() == (3, 4)
+
+    def test_returns_none_on_failure(self):
+        from amplifier_workspace.tmux import _tmux_version
+
+        with patch(
+            "amplifier_workspace.tmux.subprocess.run",
+            side_effect=OSError("tmux missing"),
+        ):
+            assert _tmux_version() is None
+
+    def test_returns_none_on_unparseable_output(self):
+        from amplifier_workspace.tmux import _tmux_version
+
+        with patch(
+            "amplifier_workspace.tmux.subprocess.run",
+            return_value=MagicMock(stdout="tmux unknown\n"),
+        ):
+            assert _tmux_version() is None
+
+
+class TestResolveClipboardCommand:
+    """Tests for cross-platform clipboard command resolution."""
+
+    def test_prefers_pbcopy(self):
+        from amplifier_workspace.tmux import _resolve_clipboard_command
+
+        with patch(
+            "amplifier_workspace.tmux.shutil.which",
+            side_effect=lambda c: f"/usr/bin/{c}" if c == "pbcopy" else None,
+        ):
+            assert _resolve_clipboard_command() == "pbcopy"
+
+    def test_falls_back_to_xclip(self):
+        from amplifier_workspace.tmux import _resolve_clipboard_command
+
+        available = {"xclip"}
+        with patch(
+            "amplifier_workspace.tmux.shutil.which",
+            side_effect=lambda c: f"/usr/bin/{c}" if c in available else None,
+        ):
+            assert _resolve_clipboard_command() == "xclip -selection clipboard"
+
+    def test_returns_none_when_nothing_available(self):
+        from amplifier_workspace.tmux import _resolve_clipboard_command
+
+        with patch("amplifier_workspace.tmux.shutil.which", return_value=None):
+            assert _resolve_clipboard_command() is None
