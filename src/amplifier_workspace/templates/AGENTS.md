@@ -36,6 +36,14 @@ The root is the right place for **anything ephemeral that doesn't need to surviv
 
 Feel free to use the root liberally for this category of work. The constraint is *persistence*, not *file creation*.
 
+## Each Subdir Is a Repo With Its Own Rules
+
+The rules above govern the **root**. Each subdir is a separate repo with its **own** conventions, and inside that subdir those conventions override your workspace defaults — you are a guest there.
+
+When you start work in a subdir — and again when the work shifts phase (design → code → debug → verify → PR) — discover and honor that repo's convention files: `AGENTS.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `CONTRIBUTING.md`, and contextual files like `PRINCIPLES.md` / `SMOKE_TESTS.md` / `KNOWN_ISSUES.md`. Read them before you change the furniture; re-read them as the work changes shape; populate the PR template from real evidence, not paraphrase. And **before you call the work done, capture the lessons it surfaced back into the file that owns them** — honoring each repo's awareness boundaries: only write a lesson into a repo that is allowed to know what it encodes.
+
+Don't reconstruct that guidance from memory. Load the `per-repo-conventions` skill, or read `foundation:docs/PER_REPO_CONVENTIONS.md`, for the full discovery pattern, re-read cadence, verification gradient, and lesson-capture routing.
+
 ## Session Lifecycle
 
 1. Workspace spun up fresh (already done)
