@@ -112,6 +112,9 @@ Adds tmux session management with configurable windows:
 
 [tmux]
 enabled = true
+mouse = true            # scroll-wheel history + drag-select (session-scoped)
+set_clipboard = true    # copy selections to the system clipboard via OSC-52
+# clipboard_binding = false  # opt-in OS-clipboard fallback (see below)
 
 [tmux.windows]
 amplifier = ""       # main Amplifier session (with resume detection)
@@ -121,6 +124,18 @@ files = "yazi"       # optional: remove line to disable
 ```
 
 When Tier 2 is enabled, the wizard offers to install optional tools (lazygit, yazi, etc.) for you with platform-appropriate commands. Each tool window is individually opt-in.
+
+#### Mouse & clipboard
+
+By default, amplifier-workspace makes the scroll wheel and drag-select copy work out of the box. These are applied **per session** with `tmux set-option -t <session> ...` immediately after the session is created, so your `~/.tmux.conf` and any other running tmux sessions are left completely untouched.
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `mouse` | `true` | `set-option mouse on` — scroll-wheel pane history and mouse drag-select. Requires tmux ≥ 2.1; skipped gracefully on older tmux. |
+| `set_clipboard` | `true` | `set-option set-clipboard on` — tmux's default drag-end copies the selection to your terminal via OSC-52, which clears the highlight **and** lands the text on your system clipboard on OSC-52-capable terminals (iTerm2, kitty, WezTerm, Ghostty, …). |
+| `clipboard_binding` | `false` | **Opt-in.** For terminals that lack OSC-52 (e.g. Apple Terminal.app), binds copy-mode drag-end to pipe the selection to an OS clipboard tool, resolved at runtime in order: `pbcopy` → `wl-copy` → `xclip -selection clipboard` → `xsel -ib`. **⚠️ Side effect:** tmux key bindings are *server-global*, so this binding also affects your other tmux sessions on the same server. Leave it off unless you need it. |
+
+Setting `mouse`/`set_clipboard`/`clipboard_binding` failures never abort session creation — the windows still open even if a setting can't be applied.
 
 ## Doctor
 

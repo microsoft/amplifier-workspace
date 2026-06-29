@@ -46,6 +46,21 @@ class TestTmuxConfig:
         tmux = TmuxConfig(windows=custom_windows)
         assert tmux.windows == custom_windows
 
+    def test_mouse_defaults_to_true(self):
+        assert TmuxConfig().mouse is True
+
+    def test_set_clipboard_defaults_to_true(self):
+        assert TmuxConfig().set_clipboard is True
+
+    def test_clipboard_binding_defaults_to_false(self):
+        assert TmuxConfig().clipboard_binding is False
+
+    def test_mouse_and_clipboard_flags_can_be_overridden(self):
+        tmux = TmuxConfig(mouse=False, set_clipboard=False, clipboard_binding=True)
+        assert tmux.mouse is False
+        assert tmux.set_clipboard is False
+        assert tmux.clipboard_binding is True
+
 
 class TestLoadConfig:
     def test_returns_defaults_when_file_missing(self, tmp_path: Path):
