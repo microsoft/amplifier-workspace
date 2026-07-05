@@ -189,7 +189,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
 
     Window creation order:
     1. amplifier window (always first) — uses resume-detection rcfile
-    2. Shell window (second, if configured) — two-pane horizontal split
+    2. Shell window (second, if configured) — single pane
     3. Tool windows from config.windows (in order; skips amplifier/shell keys and empty commands)
     4. Selects amplifier window so it is focused on attach
 
@@ -217,7 +217,7 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
         check=True,
     )
 
-    # 2) Shell window (second, if configured) — create window then add a second pane via horizontal split
+    # 2) Shell window (second, if configured) — single pane
     if "shell" in config.windows:
         subprocess.run(
             [
@@ -227,17 +227,6 @@ def create_session(workdir: Path, config: "TmuxConfig") -> None:
                 name,
                 "-n",
                 "shell",
-                f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
-            ],
-            check=True,
-        )
-        subprocess.run(
-            [
-                "tmux",
-                "split-window",
-                "-h",
-                "-t",
-                f"{name}:shell",
                 f"exec bash --rcfile {shlex.quote(str(shell_rc))}",
             ],
             check=True,
