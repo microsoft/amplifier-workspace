@@ -433,8 +433,8 @@ class TestCreateSessionWindows:
             "Shell new-window should be called before tool window new-window"
         )
 
-    def test_shell_window_gets_horizontal_split(self, tmp_path):
-        """Shell window gets exactly one horizontal split via split-window -h."""
+    def test_shell_window_is_single_pane(self, tmp_path):
+        """Shell window is a single pane — no split-window call."""
         workdir = tmp_path / "myproject"
         config = TmuxConfig(windows={"amplifier": "", "shell": ""})
         with (
@@ -444,10 +444,10 @@ class TestCreateSessionWindows:
             mock_rcfiles.return_value = Path("/tmp/rcfiles")
             create_session(workdir, config)
         calls = mock_run.call_args_list
-        split_calls = [
-            c for c in calls if "split-window" in c.args[0] and "-h" in c.args[0]
-        ]
-        assert len(split_calls) == 1, "Expected exactly one split-window -h call"
+        split_calls = [c for c in calls if "split-window" in c.args[0]]
+        assert len(split_calls) == 0, (
+            "Expected no split-window calls — shell window should be a single pane"
+        )
 
     def test_no_split_when_no_shell_window(self, tmp_path):
         """No split-window call when config has no shell window."""
