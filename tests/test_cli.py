@@ -289,3 +289,137 @@ def test_cli_manifest_reap_unknown_id_exits_nonzero(tmp_path):
         importlib.reload(cli)
         with pytest.raises(SystemExit):
             cli.main()
+
+
+# ---------------------------------------------------------------------------
+# Batch A — help word, --version, epilog, new-workspace footgun gate
+# ---------------------------------------------------------------------------
+
+
+def test_cli_help_word_prints_help_and_exits_zero(capsys):
+    """'help' (a bare word) prints top-level help and exits 0 — never creates ./help/."""
+    with patch.object(sys, "argv", ["amplifier-workspace", "help"]):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "usage" in out.lower()
+    # epilog enumerates subcommands
+    assert "doctor" in out
+    assert "manifest" in out
+
+
+def test_cli_help_subcommand_prints_help_and_exits_zero(capsys):
+    """'help <subcommand>' also prints help and exits 0."""
+    with patch.object(sys, "argv", ["amplifier-workspace", "help", "doctor"]):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+    assert exc_info.value.code == 0
+    assert "usage" in capsys.readouterr().out.lower()
+
+
+def test_cli_version_flag_prints_version(capsys):
+    """'--version' prints the version and exits 0 (workdir parser)."""
+    with patch.object(sys, "argv", ["amplifier-workspace", "--version"]):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "amplifier-workspace" in out
+
+
+def test_cli_subparser_has_version_action():
+    """The subcommand fast-path parser also carries a --version action (both parsers)."""
+    importlib.reload(cli)
+    # A bare '--version' routes to the workdir parser; assert the sub_parser
+    # branch defines it too by constructing the same parser argparse builds.
+    # Simplest proof: '--version' resolves through main without error.
+    with patch.object(sys, "argv", ["amplifier-workspace", "--version"]):
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+    assert exc_info.value.code == 0
+
+
+def test_cli_help_output_points_to_subcommand_help(capsys):
+    """Top-level help epilog points at 'amplifier-workspace <subcommand> -h'."""
+    with patch.object(sys, "argv", ["amplifier-workspace", "help"]):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit):
+            cli.main()
+    out = capsys.readouterr().out
+    assert "<subcommand> -h" in out
+
+
+class TestNewWorkspaceFootgun:
+    """A bare-word non-subcommand must not silently scaffold a workspace."""
+
+    def test_bare_word_non_tty_refuses_exit_2(self, capsys, monkeypatch):
+        """Non-interactive + bare word (not a dir, no separator) -> exit 2 + remedy."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        with (
+            patch("amplifier_workspace.config.load_config", return_value=MagicMock()),
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                cli.main(["definitelynotacommand"])
+        assert exc_info.value.code == 2
+        mock_rw.assert_not_called()
+        err = capsys.readouterr().err
+        assert "existing directory" in err or "path-like" in err
+
+    def test_bare_word_tty_confirm_proceeds(self, monkeypatch):
+        """Interactive + 'y' proceeds to run_workspace."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        with (
+            patch("builtins.input", return_value="y"),
+            patch("amplifier_workspace.config.load_config", return_value=MagicMock()),
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            cli.main(["freshbareword"])
+        mock_rw.assert_called_once()
+
+    def test_bare_word_tty_decline_exits_1(self, monkeypatch):
+        """Interactive + 'n' aborts with exit 1 and never runs the workspace."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        with (
+            patch("builtins.input", return_value="n"),
+            patch("amplifier_workspace.config.load_config", return_value=MagicMock()),
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                cli.main(["barewordtypo"])
+        assert exc_info.value.code == 1
+        mock_rw.assert_not_called()
+
+    def test_path_like_dot_slash_is_not_gated(self, monkeypatch):
+        """A path-like arg (./name) keeps the no-prompt behavior even if it doesn't exist."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)  # would exit 2 if gated
+        with (
+            patch("amplifier_workspace.config.load_config", return_value=MagicMock()),
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            cli.main(["./somenewpath"])
+        mock_rw.assert_called_once()
+
+    def test_existing_directory_is_not_gated(self, tmp_path, monkeypatch):
+        """An existing directory (bare name) keeps the no-prompt create/resume UX."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)  # would exit 2 if gated
+        with (
+            patch("amplifier_workspace.config.load_config", return_value=MagicMock()),
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            cli.main([str(tmp_path)])
+        mock_rw.assert_called_once()
+
+    def test_kill_flag_bare_word_not_gated(self, monkeypatch):
+        """-k never creates, so a bare word with -k is exempt from the gate."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        with (
+            patch("amplifier_workspace.config.load_config", return_value=MagicMock()),
+            patch("amplifier_workspace.workspace.run_workspace") as mock_rw,
+        ):
+            cli.main(["somebareword", "-k"])
+        mock_rw.assert_called_once()

@@ -4,11 +4,12 @@ import contextlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from amplifier_workspace.doctor import (
     _print_check,
     run_doctor,
 )
-
 
 _SAMPLE_INSTALL_INFO = {
     "source": "git",
@@ -536,3 +537,168 @@ class TestDoctorTmuxChecks:
         assert exit_code == 0
         # Output must report window count (e.g. "2 window(s) configured")
         assert "2 window" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Batch B — workspace-scoped checks + update-availability honesty
+# ---------------------------------------------------------------------------
+
+
+def _run_doctor_for_workspace(
+    workdir, capsys, *, agents_template="", install_info=None
+):
+    """Run run_doctor(workdir) with all tool/config externals patched.
+
+    git + amplifier are 'found' and config exists so that the only interesting
+    output is the workspace-scoped section. Returns (exit_code, captured).
+    """
+    mock_config = MagicMock()
+    mock_config.default_repos = []
+    mock_config.agents_template = agents_template
+    mock_config.tmux.enabled = False
+
+    mock_config_path = MagicMock(spec=Path)
+    mock_config_path.exists.return_value = True
+
+    info = install_info if install_info is not None else _SAMPLE_INSTALL_INFO
+
+    with (
+        patch(
+            "amplifier_workspace.doctor._get_install_info_for_doctor",
+            return_value=info,
+        ),
+        patch(
+            "amplifier_workspace.doctor._check_for_update_doctor",
+            return_value=(False, "up to date"),
+        ),
+        patch(
+            "amplifier_workspace.doctor.shutil.which",
+            side_effect=_make_which({"git", "amplifier"}),
+        ),
+        patch("amplifier_workspace.doctor.load_config", return_value=mock_config),
+        patch("amplifier_workspace.doctor.CONFIG_PATH", mock_config_path),
+    ):
+        exit_code = run_doctor(workdir)
+        captured = capsys.readouterr()
+    return exit_code, captured
+
+
+def _make_older_workspace(root: Path) -> Path:
+    """A workspace with AGENTS.md + settings but NO manifest (pre-manifest scaffold)."""
+    ws = root / "ws"
+    (ws / ".amplifier").mkdir(parents=True)
+    (ws / ".amplifier" / "settings.yaml").write_text("bundle:\n  active: x\n")
+    (ws / "AGENTS.md").write_text("# local edits\n")
+    return ws
+
+
+class TestDoctorWorkspaceChecks:
+    def test_manifest_absent_warns_not_found(self, tmp_path, capsys):
+        """A workspace without WORKSPACE-MANIFEST.json warns (does not fail)."""
+        ws = _make_older_workspace(tmp_path)
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+        assert "WORKSPACE-MANIFEST.json" in captured.out
+        assert "not found" in captured.out
+        assert exit_code == 0  # a missing manifest is a warning, not a failure
+
+    def test_manifest_active_resources_listed(self, tmp_path, capsys):
+        """Active resources are listed with a 'gate destroy' reminder."""
+        from amplifier_workspace import manifest
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "AGENTS.md").write_text("x\n")
+        manifest.add_resource(ws, "dtu", "dtu-123", note="env")
+
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+        assert "1 active" in captured.out
+        assert "dtu-123" in captured.out
+        assert "gate destroy" in captured.out
+        assert exit_code == 0
+
+    def test_manifest_all_reaped_passes(self, tmp_path, capsys):
+        """A manifest whose resources are all reaped reports 0 active and passes."""
+        from amplifier_workspace import manifest
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "AGENTS.md").write_text("x\n")
+        manifest.add_resource(ws, "dtu", "dtu-123")
+        manifest.reap_resource(ws, "dtu-123")
+
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+        assert "0 active" in captured.out
+        assert exit_code == 0
+
+    def test_corrupt_manifest_is_a_failure(self, tmp_path, capsys):
+        """An unparseable manifest is a doctor failure (exit 1) with a remedy."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "AGENTS.md").write_text("x\n")
+        (ws / "WORKSPACE-MANIFEST.json").write_text("{bad json")
+
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+        assert "unparseable" in captured.out.lower()
+        assert exit_code == 1
+
+    def test_template_drift_warns(self, tmp_path, capsys):
+        """A workspace AGENTS.md that differs from the packaged template warns."""
+        ws = _make_older_workspace(tmp_path)  # AGENTS.md = "# local edits\n"
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+        assert "AGENTS.md differs from the packaged template" in captured.out
+        assert exit_code == 0
+
+    def test_template_match_passes(self, tmp_path, capsys):
+        """A workspace AGENTS.md identical to the packaged template passes cleanly."""
+        from amplifier_workspace.doctor import _packaged_agents_md
+
+        packaged = _packaged_agents_md()
+        assert packaged is not None
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "AGENTS.md").write_bytes(packaged)
+
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+        assert "matches packaged" in captured.out
+        assert exit_code == 0
+
+    def test_custom_template_skips_drift_check(self, tmp_path, capsys):
+        """When a custom agents_template is configured, drift is not flagged."""
+        ws = _make_older_workspace(tmp_path)  # differs from packaged
+        # Point at a real custom template so the pre-existing agents_template
+        # validity check passes and we isolate the drift behavior.
+        custom = tmp_path / "custom-template.md"
+        custom.write_text("# custom\n")
+        exit_code, captured = _run_doctor_for_workspace(
+            ws, capsys, agents_template=str(custom)
+        )
+        assert "differs from the packaged template" not in captured.out
+        assert exit_code == 0
+
+    def test_non_workspace_dir_has_no_workspace_section(self, tmp_path, capsys):
+        """A plain directory (not a workspace) gets no workspace-scoped section."""
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        exit_code, captured = _run_doctor_for_workspace(plain, capsys)
+        assert "workspace:" not in captured.out
+        assert exit_code == 0
+
+
+class TestDoctorUpdateHonesty:
+    @pytest.mark.parametrize(
+        "source,needle",
+        [
+            ("editable", "editable"),
+            ("pypi", "pip/PyPI"),
+            ("unknown", "unknown install source"),
+        ],
+    )
+    def test_non_git_sources_are_not_checkable(self, tmp_path, capsys, source, needle):
+        """editable/pypi/unknown never claim 'update available' — they say 'not checkable'."""
+        info = {"source": source, "version": "1.0.0", "commit": None, "url": None}
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        _, captured = _run_doctor_for_workspace(plain, capsys, install_info=info)
+        assert "not checkable" in captured.out
+        assert "update available" not in captured.out
+        assert needle in captured.out

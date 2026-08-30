@@ -3,12 +3,70 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from amplifier_workspace.config import load_config
 
 _SUBCOMMANDS = ("doctor", "upgrade", "setup", "config", "list", "update", "manifest")
+
+# One-line summaries used in the top-level parser epilog and `help` output.
+_SUBCOMMAND_SUMMARIES: tuple[tuple[str, str], ...] = (
+    ("setup", "Run the interactive setup wizard."),
+    ("doctor", "Check tool + workspace health."),
+    ("upgrade", "Self-update the amplifier-workspace CLI tool."),
+    ("update", "Update a workspace's submodules (not the CLI tool)."),
+    ("config", "Manage configuration (list/get/set/add/remove/reset)."),
+    ("manifest", "List or edit the workspace resource manifest."),
+    ("list", "List workspaces."),
+    ("help", "Show this help."),
+)
+
+_EPILOG = (
+    "subcommands:\n"
+    + "\n".join(f"  {name:<10}{summary}" for name, summary in _SUBCOMMAND_SUMMARIES)
+    + "\n\nRun 'amplifier-workspace <subcommand> -h' for details."
+    + "\nRun 'amplifier-workspace --version' to print the version."
+)
+
+
+def _version_from_pyproject() -> str:
+    """Read the version from pyproject.toml (editable/source checkout fallback)."""
+    import tomllib
+
+    try:
+        # src/amplifier_workspace/cli.py -> repo root is parents[2]
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        data = tomllib.loads(pyproject.read_text())
+        return str(data["project"]["version"])
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        return "unknown"
+
+
+def _resolve_version() -> str:
+    """Return the installed version, falling back to pyproject.toml for source checkouts."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("amplifier-workspace")
+    except PackageNotFoundError:
+        return _version_from_pyproject()
+
+
+def _looks_path_like(raw: str) -> bool:
+    """Return True if *raw* is an explicit path (has a separator or a . / ~ prefix).
+
+    Path-like arguments keep the historical no-prompt create/resume behavior;
+    only a bare word (a plausible typo of a subcommand) triggers the
+    new-workspace confirmation gate.
+    """
+    return (
+        raw.startswith((".", "~"))
+        or "/" in raw
+        or os.sep in raw
+        or bool(os.altsep and os.altsep in raw)
+    )
 
 
 def _confirm_destroy(workdir: Path) -> None:
@@ -19,6 +77,38 @@ def _confirm_destroy(workdir: Path) -> None:
     print(f"This will DESTROY: {workdir}")
     try:
         answer = input("Are you sure? [y/N] ")
+    except EOFError:
+        sys.exit(1)
+    if answer.strip().lower() != "y":
+        sys.exit(1)
+
+
+def _confirm_new_workspace(workdir: Path) -> None:
+    """Guard against silently creating a NEW workspace from a bare-word typo.
+
+    A bare word (no path separator, no './' or '~' prefix) that is not an
+    existing directory is far more likely a mistyped subcommand than an intended
+    new-workspace path. Rather than silently scaffolding one, confirm first.
+
+    - Interactive (TTY): prompt y/N; exit 1 if not confirmed.
+    - Non-interactive (no TTY): refuse with exit 2 and a remedy, so scripts fail
+      loudly instead of littering the filesystem with typo'd workspaces.
+    """
+    print(f"About to create a NEW workspace at {workdir}")
+    if not sys.stdin.isatty():
+        print(
+            "error: refusing to create a new workspace non-interactively from a bare "
+            "name.",
+            file=sys.stderr,
+        )
+        print(
+            "  Pass an existing directory, use a path-like form (e.g. ./name), "
+            "or confirm interactively.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    try:
+        answer = input("Create it? [y/N] ")
     except EOFError:
         sys.exit(1)
     if answer.strip().lower() != "y":
@@ -37,11 +127,11 @@ def _cmd_setup() -> None:
     run_wizard()
 
 
-def _cmd_doctor() -> None:
+def _cmd_doctor(workdir: Path | None = None) -> None:
     """Run health checks and exit with the check result code."""
     from amplifier_workspace.doctor import run_doctor  # noqa: PLC0415
 
-    sys.exit(run_doctor())
+    sys.exit(run_doctor(workdir))
 
 
 def _cmd_upgrade(*, force: bool, check_only: bool) -> None:
@@ -134,6 +224,51 @@ def _cmd_manifest(
     print(manifest.format_manifest_listing(workdir))
 
 
+def _build_workdir_parser() -> argparse.ArgumentParser:
+    """Build the top-level workdir parser (the default create/resume path).
+
+    The epilog enumerates the subcommands so ``--help`` and ``help`` surface
+    them even though they live behind a separate fast-path parser.
+    """
+    parser = argparse.ArgumentParser(
+        prog="amplifier-workspace",
+        description="Bootstrap and launch an Amplifier workspace.",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_resolve_version()}",
+    )
+    parser.add_argument(
+        "workdir",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="Path to the workspace directory.",
+    )
+    parser.add_argument(
+        "-d",
+        "--destroy",
+        action="store_true",
+        help="Destroy the workspace directory and exit.",
+    )
+    parser.add_argument(
+        "-f",
+        "--fresh",
+        action="store_true",
+        help="Remove an existing workspace before recreating it.",
+    )
+    parser.add_argument(
+        "-k",
+        "--kill",
+        action="store_true",
+        help="Kill the tmux session for this workspace (directory is preserved).",
+    )
+    return parser
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -142,23 +277,50 @@ def _cmd_manifest(
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the amplifier-workspace CLI."""
     try:
+        effective_argv = list(sys.argv[1:]) if argv is None else list(argv)
+
+        # `help` / `help <subcommand>` — print top-level help and exit 0. This
+        # is intercepted BEFORE the workdir parser so a bare `help` can never be
+        # silently consumed as a new-workspace path (see _confirm_new_workspace).
+        if effective_argv and effective_argv[0] == "help":
+            _build_workdir_parser().print_help()
+            sys.exit(0)
+
         # Fast-path: dispatch known subcommands before the workdir parser sees them.
-        if len(sys.argv) >= 2 and sys.argv[1] in _SUBCOMMANDS:
+        if effective_argv and effective_argv[0] in _SUBCOMMANDS:
             sub_parser = argparse.ArgumentParser(
                 prog="amplifier-workspace",
                 description="Bootstrap and launch an Amplifier workspace.",
+            )
+            sub_parser.add_argument(
+                "--version",
+                action="version",
+                version=f"%(prog)s {_resolve_version()}",
             )
             subparsers = sub_parser.add_subparsers(dest="command")
 
             # setup — no extra args
             subparsers.add_parser("setup", help="Run interactive setup wizard.")
 
-            # doctor — no extra args
-            subparsers.add_parser("doctor", help="Run health checks.")
+            # doctor — optional workdir (defaults to cwd)
+            doctor_p = subparsers.add_parser(
+                "doctor", help="Check tool + workspace health."
+            )
+            doctor_p.add_argument(
+                "workdir",
+                nargs="?",
+                type=Path,
+                default=None,
+                help=(
+                    "Workspace directory for workspace-scoped checks. "
+                    "Defaults to the current working directory."
+                ),
+            )
 
             # upgrade — --force and --check flags
             upgrade_p = subparsers.add_parser(
-                "upgrade", help="Upgrade amplifier-workspace."
+                "upgrade",
+                help="Self-update the amplifier-workspace CLI tool (not workspace repos).",
             )
             upgrade_p.add_argument(
                 "--force",
@@ -205,7 +367,7 @@ def main(argv: list[str] | None = None) -> None:
             # update — optional workdir (defaults to cwd)
             update_p = subparsers.add_parser(
                 "update",
-                help="Pull all submodules to their latest remote main.",
+                help="Update a workspace's submodules (not the CLI tool; see 'upgrade').",
             )
             update_p.add_argument(
                 "workdir",
@@ -257,12 +419,17 @@ def main(argv: list[str] | None = None) -> None:
                 help="Mark the resource with this id as reaped.",
             )
 
-            args = sub_parser.parse_args()
+            args = sub_parser.parse_args(effective_argv)
 
             if args.command == "setup":
                 _cmd_setup()
             elif args.command == "doctor":
-                _cmd_doctor()
+                doctor_workdir = (
+                    Path(args.workdir).expanduser().resolve()
+                    if args.workdir is not None
+                    else Path.cwd()
+                )
+                _cmd_doctor(doctor_workdir)
             elif args.command == "upgrade":
                 _cmd_upgrade(force=args.force, check_only=args.check_only)
             elif args.command == "config":
@@ -295,37 +462,9 @@ def main(argv: list[str] | None = None) -> None:
                 )
             return
 
-        parser = argparse.ArgumentParser(
-            prog="amplifier-workspace",
-            description="Bootstrap and launch an Amplifier workspace.",
-        )
-        parser.add_argument(
-            "workdir",
-            nargs="?",
-            type=Path,
-            default=None,
-            help="Path to the workspace directory.",
-        )
-        parser.add_argument(
-            "-d",
-            "--destroy",
-            action="store_true",
-            help="Destroy the workspace directory and exit.",
-        )
-        parser.add_argument(
-            "-f",
-            "--fresh",
-            action="store_true",
-            help="Remove an existing workspace before recreating it.",
-        )
-        parser.add_argument(
-            "-k",
-            "--kill",
-            action="store_true",
-            help="Kill the tmux session for this workspace (directory is preserved).",
-        )
+        parser = _build_workdir_parser()
 
-        args = parser.parse_args(argv)
+        args = parser.parse_args(effective_argv)
 
         if args.workdir is None:
             parser.print_help()
@@ -337,6 +476,23 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.destroy:
             _confirm_destroy(workdir)
+
+        # Footgun guard: a bare word (no path separator, no ./ or ~ prefix) that
+        # is not an existing directory is almost certainly a mistyped subcommand,
+        # not an intended new-workspace path. Confirm before silently scaffolding
+        # one. Existing dirs and path-like args keep the historical no-prompt UX.
+        # -k/-d never create, so they are exempt (destroy has its own confirm).
+        raw_workdir = next(
+            (tok for tok in effective_argv if not tok.startswith("-")), None
+        )
+        if (
+            not args.kill
+            and not args.destroy
+            and raw_workdir is not None
+            and not _looks_path_like(raw_workdir)
+            and not workdir.exists()
+        ):
+            _confirm_new_workspace(workdir)
 
         from amplifier_workspace.workspace import run_workspace
 

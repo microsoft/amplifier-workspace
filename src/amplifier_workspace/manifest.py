@@ -172,6 +172,17 @@ def _parse_resources(data: dict) -> list[ManifestResource]:
     return resources
 
 
+def iter_resources(data: dict) -> list[ManifestResource]:
+    """Public seam: parse an already-loaded manifest dict into resources.
+
+    Convenience for read-only summarizers (e.g. ``amplifier-workspace doctor``)
+    that already hold the parsed dict from :func:`load_manifest` and want the
+    fully-typed resource list.  Raises :class:`ManifestError` on a malformed
+    entry, mirroring the destroy gate's fail-closed parsing.
+    """
+    return _parse_resources(data)
+
+
 # ---------------------------------------------------------------------------
 # Mutating helpers (scripted use / CLI --add, --reap)
 # ---------------------------------------------------------------------------

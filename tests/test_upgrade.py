@@ -6,9 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from amplifier_workspace.upgrade import (
+    UpgradeRefused,
     _check_for_update,
     _do_upgrade,
     _get_install_info,
+    _reinstall_target,
     run_upgrade,
 )
 
@@ -110,19 +112,27 @@ class TestCheckForUpdate:
         assert update_available is False
         assert "editable" in message.lower() or "manually" in message.lower()
 
-    def test_unknown_source_always_returns_true(self):
-        """_check_for_update returns (True, msg) for unknown install source."""
+    def test_unknown_source_is_not_checkable(self):
+        """_check_for_update never fabricates a signal for an unknown source.
+
+        (Honesty fix: previously returned True 'upgrading to be safe'.)
+        """
         info = {"source": "unknown", "version": "0.0.0", "commit": None, "url": None}
         update_available, message = _check_for_update(info)
 
-        assert update_available is True
+        assert update_available is False
+        assert "not checkable" in message.lower()
 
-    def test_pypi_source_returns_true(self):
-        """_check_for_update returns (True, msg) for pypi installs (not yet implemented)."""
+    def test_pypi_source_is_not_checkable(self):
+        """_check_for_update never fabricates a signal for a pypi install.
+
+        (Honesty fix: previously returned True 'upgrading to be safe'.)
+        """
         info = {"source": "pypi", "version": "1.0.0", "commit": None, "url": None}
         update_available, message = _check_for_update(info)
 
-        assert update_available is True
+        assert update_available is False
+        assert "not checkable" in message.lower()
 
     def test_git_up_to_date_returns_false(self):
         """_check_for_update returns (False, msg) when local and remote SHA match."""
@@ -357,3 +367,230 @@ class TestDoUpgrade:
         assert result is False
         captured = capsys.readouterr()
         assert "error" in captured.out.lower() or "error" in captured.err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Batch B.3 / Batch C — provenance-strict reinstall target + honesty
+# ---------------------------------------------------------------------------
+
+
+class TestGetInstallInfoRef:
+    def test_captures_requested_revision_as_ref(self):
+        """_get_install_info records the tracked branch/tag (requested_revision)."""
+        direct_url = {
+            "url": "https://github.com/microsoft/amplifier-workspace",
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "abcdef1234567890abcdef1234567890abcdef12",
+                "requested_revision": "feat/workspace-manifest",
+            },
+        }
+        mock_dist = MagicMock()
+        mock_dist.metadata = {"Version": "1.2.3"}
+        mock_dist.read_text.return_value = json.dumps(direct_url)
+
+        with patch(
+            "amplifier_workspace.upgrade.importlib.metadata.distribution",
+            return_value=mock_dist,
+        ):
+            result = _get_install_info()
+
+        assert result["ref"] == "feat/workspace-manifest"
+
+    def test_ref_is_none_when_not_recorded(self):
+        """ref is None for a git install that tracks the default branch."""
+        direct_url = {
+            "url": "https://github.com/microsoft/amplifier-workspace",
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "abcdef1234567890abcdef1234567890abcdef12",
+            },
+        }
+        mock_dist = MagicMock()
+        mock_dist.metadata = {"Version": "1.2.3"}
+        mock_dist.read_text.return_value = json.dumps(direct_url)
+
+        with patch(
+            "amplifier_workspace.upgrade.importlib.metadata.distribution",
+            return_value=mock_dist,
+        ):
+            result = _get_install_info()
+
+        assert result["ref"] is None
+
+
+class TestReinstallTarget:
+    def test_git_with_ref(self):
+        """git provenance with a tracked ref -> git+URL@ref."""
+        info = {
+            "source": "git",
+            "version": "1.0.0",
+            "commit": "abc",
+            "url": "https://github.com/microsoft/amplifier-workspace",
+            "ref": "main",
+        }
+        assert (
+            _reinstall_target(info)
+            == "git+https://github.com/microsoft/amplifier-workspace@main"
+        )
+
+    def test_git_without_ref(self):
+        """git provenance with no ref -> plain git+URL."""
+        info = {
+            "source": "git",
+            "version": "1.0.0",
+            "commit": "abc",
+            "url": "https://github.com/microsoft/amplifier-workspace",
+            "ref": None,
+        }
+        assert (
+            _reinstall_target(info)
+            == "git+https://github.com/microsoft/amplifier-workspace"
+        )
+
+    def test_git_without_url_refuses(self):
+        """git provenance missing a URL refuses rather than guessing."""
+        info = {
+            "source": "git",
+            "version": "1.0.0",
+            "commit": "abc",
+            "url": None,
+            "ref": None,
+        }
+        with pytest.raises(UpgradeRefused):
+            _reinstall_target(info)
+
+    def test_editable_refuses_with_local_dev_commands(self):
+        """editable provenance refuses and names the local-dev reinstall commands."""
+        info = {"source": "editable", "version": "0.1.0", "commit": None, "url": None}
+        with pytest.raises(UpgradeRefused) as exc_info:
+            _reinstall_target(info)
+        msg = str(exc_info.value)
+        assert "--from" in msg or "uv tool install -e" in msg
+
+    def test_pypi_refuses(self):
+        """pypi provenance refuses (never reinstalls a PyPI install from git)."""
+        info = {"source": "pypi", "version": "1.0.0", "commit": None, "url": None}
+        with pytest.raises(UpgradeRefused):
+            _reinstall_target(info)
+
+    def test_unknown_refuses(self):
+        """unknown provenance refuses with a remedy."""
+        info = {"source": "unknown", "version": "0.0.0", "commit": None, "url": None}
+        with pytest.raises(UpgradeRefused):
+            _reinstall_target(info)
+
+
+_EDITABLE_INFO = {
+    "source": "editable",
+    "version": "0.1.0",
+    "commit": None,
+    "url": "file:///home/user/amplifier-workspace",
+    "ref": None,
+}
+_PYPI_INFO = {
+    "source": "pypi",
+    "version": "1.0.0",
+    "commit": None,
+    "url": None,
+    "ref": None,
+}
+_UNKNOWN_INFO = {
+    "source": "unknown",
+    "version": "0.0.0",
+    "commit": None,
+    "url": None,
+    "ref": None,
+}
+
+
+class TestRunUpgradeRefusals:
+    @pytest.mark.parametrize("info", [_EDITABLE_INFO, _PYPI_INFO, _UNKNOWN_INFO])
+    def test_refuses_non_git_provenance_before_installing(self, info, capsys):
+        """run_upgrade refuses editable/pypi/unknown with exit 2 and never installs."""
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                return_value=info,
+            ),
+            patch("amplifier_workspace.upgrade._do_upgrade") as mock_do_upgrade,
+            patch(
+                "amplifier_workspace.upgrade._run_doctor_after_upgrade"
+            ) as mock_doctor,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                run_upgrade()
+
+        assert exc_info.value.code == 2
+        mock_do_upgrade.assert_not_called()
+        mock_doctor.assert_not_called()
+
+    def test_editable_refusal_prints_local_dev_commands(self, capsys):
+        """The editable refusal surfaces the exact local-dev reinstall commands."""
+        with patch(
+            "amplifier_workspace.upgrade._get_install_info",
+            return_value=_EDITABLE_INFO,
+        ):
+            with pytest.raises(SystemExit):
+                run_upgrade()
+
+        out = capsys.readouterr().out
+        assert "--from" in out or "uv tool install -e" in out
+
+
+class TestRunUpgradeVerifiesMove:
+    def test_reports_version_move_after_upgrade(self, capsys):
+        """After a successful reinstall, run_upgrade reports before -> after honestly."""
+        before = {
+            "source": "git",
+            "version": "1.0.0",
+            "commit": "aaaaaaaaaaaa",
+            "url": "https://github.com/microsoft/amplifier-workspace",
+            "ref": "main",
+        }
+        after = dict(before, version="1.1.0", commit="bbbbbbbbbbbb")
+
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                side_effect=[before, after],
+            ),
+            patch(
+                "amplifier_workspace.upgrade._check_for_update",
+                return_value=(True, "update available (aaaaaaaa → bbbbbbbb)"),
+            ),
+            patch("amplifier_workspace.upgrade._do_upgrade", return_value=True),
+            patch("amplifier_workspace.upgrade._run_doctor_after_upgrade"),
+        ):
+            run_upgrade()
+
+        out = capsys.readouterr().out
+        assert "upgraded" in out.lower()
+        assert "1.0.0" in out and "1.1.0" in out
+
+    def test_reports_unchanged_when_version_did_not_move(self, capsys):
+        """If nothing moved, run_upgrade says so plainly rather than implying a bump."""
+        info = {
+            "source": "git",
+            "version": "1.0.0",
+            "commit": "aaaaaaaaaaaa",
+            "url": "https://github.com/microsoft/amplifier-workspace",
+            "ref": "main",
+        }
+
+        with (
+            patch(
+                "amplifier_workspace.upgrade._get_install_info",
+                side_effect=[info, dict(info)],
+            ),
+            patch(
+                "amplifier_workspace.upgrade._check_for_update",
+                return_value=(True, "update available"),
+            ),
+            patch("amplifier_workspace.upgrade._do_upgrade", return_value=True),
+            patch("amplifier_workspace.upgrade._run_doctor_after_upgrade"),
+        ):
+            run_upgrade()
+
+        out = capsys.readouterr().out
+        assert "unchanged" in out.lower()
