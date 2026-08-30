@@ -28,6 +28,9 @@ _DEFAULT_WINDOWS: dict[str, str] = {
     "shell": "",
 }
 
+# Public copy for callers (e.g. config_manager reset/defaults).
+DEFAULT_WINDOWS: dict[str, str] = dict(_DEFAULT_WINDOWS)
+
 
 @dataclass
 class TmuxConfig:
