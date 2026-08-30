@@ -141,46 +141,145 @@ def _cmd_upgrade(*, force: bool, check_only: bool) -> None:
     run_upgrade(force=force, check_only=check_only)
 
 
-def _cmd_config(action: str | None, key: str | None, value: str | None) -> None:
-    """Manage configuration via CRUD operations."""
-    from amplifier_workspace.config import load_config as _load_config  # noqa: PLC0415
-    from amplifier_workspace.config_manager import (  # noqa: PLC0415
-        add_to_setting,
-        get_nested_setting,
-        remove_from_setting,
-        set_nested_setting,
-        write_config_raw,
-    )
+def _normalize_set_args(key: str, rest: list[str]) -> tuple[str | None, str | None]:
+    """Normalize `config set` tokens into (key, value), accepting all forms.
 
-    if action == "list":
-        cfg = _load_config()
-        print(f"workspace.bundle={cfg.bundle}")
-        print(f"workspace.default_repos={cfg.default_repos}")
-        print(f"workspace.agents_template={cfg.agents_template}")
-        print(f"tmux.enabled={cfg.tmux.enabled}")
-        for name, cmd in cfg.tmux.windows.items():
-            print(f"tmux.windows.{name}={cmd}")
-    elif action == "get":
-        if key is not None:
-            print(get_nested_setting(key))
-    elif action == "set":
-        if key is not None:
-            set_nested_setting(key, value)
-    elif action == "add":
-        if key is not None:
-            print(add_to_setting(key, value))
-    elif action == "remove":
-        if key is not None:
-            print(remove_from_setting(key, value))
-    elif action == "reset":
-        try:
-            answer = input("Reset configuration to defaults? [y/N] ")
-        except EOFError:
-            sys.exit(1)
-        if answer.strip().lower() == "y":
-            write_config_raw({})
+    Supports:
+      * ``set key value``   -> ("key", "value")
+      * ``set key=value``   -> ("key", "value")
+      * ``set key = value`` -> ("key", "value")   (stray '=' token)
+      * ``set key =value`` / ``set key= value`` variants
+
+    Returns (key, None) when no value was supplied (the caller reports it).
+    """
+    tokens = [t for t in [key, *rest] if t != "="]
+    if not tokens:
+        return None, None
+
+    head = tokens[0]
+    if "=" in head:
+        k, v = head.split("=", 1)
+        if v == "" and len(tokens) > 1:
+            v = " ".join(tokens[1:])
+        return k, v
+
+    if len(tokens) == 1:
+        return head, None
+
+    rest_tokens = list(tokens[1:])
+    rest_tokens[0] = rest_tokens[0].removeprefix("=")
+    return head, " ".join(rest_tokens)
+
+
+def _config_key_error(exc) -> None:
+    """Print an unknown-key error (valid keys + did-you-mean) and exit 2."""
+    print(f"error: {exc}", file=sys.stderr)
+    print("valid keys:", file=sys.stderr)
+    for k in exc.valid_keys:
+        print(f"  {k}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _require_key(action: str, key: str | None) -> str:
+    """Return *key*, or print a usage error and exit 2 when it is missing.
+
+    Argparse already makes the key positional required for these actions; this
+    is a defensive narrowing so the value type is a concrete str downstream.
+    """
+    if key is None:
+        print(f"error: config {action} requires a key", file=sys.stderr)
+        sys.exit(2)
+    return key
+
+
+def _cmd_config(
+    action: str | None,
+    *,
+    key: str | None = None,
+    set_tokens: list[str] | None = None,
+    value: str | None = None,
+) -> None:
+    """Manage configuration: validated, coerced, and every change reported."""
+    from amplifier_workspace import config_manager as cm
+
+    try:
+        if action in (None, "list"):
+            print(cm.format_config_listing())
+        elif action == "get":
+            key = _require_key(action, key)
+            cm.validate_key(key)
+            print(cm.format_get_value(cm.get_nested_setting(key)))
+        elif action == "set":
+            k, v = _normalize_set_args(key or "", set_tokens or [])
+            if not k or v is None:
+                print(
+                    f"error: config set needs a value: 'config set {key} <value>'",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            cm.validate_key(k)
+            coerced = cm.coerce_for_set(k, v)
+            print(cm.set_nested_setting(k, coerced))
+        elif action == "add":
+            key = _require_key(action, key)
+            cm.validate_key(key)
+            if not cm.is_addable_key(key):
+                raise cm.ConfigValueError(
+                    f"{key} is not a list — use 'config set {key} <value>'"
+                )
+            print(cm.add_to_setting(key, value))
+        elif action == "remove":
+            key = _require_key(action, key)
+            # Allow removing a key present on disk even if unknown, so a bogus
+            # or typo'd key can be cleaned up (defect 7); otherwise validate.
+            if not cm.is_known_key(key) and not cm.key_exists_in_file(key):
+                raise cm.ConfigKeyError(key, cm.known_keys(), cm.suggest_keys(key))
+            print(cm.remove_from_setting(key, value))
+        elif action == "reset":
+            _cmd_config_reset(cm)
+    except cm.ConfigKeyError as exc:
+        _config_key_error(exc)
+    except cm.ConfigValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except ValueError as exc:
+        # CRUD-level failures (e.g. 'not found') are usage errors, not crashes.
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _cmd_config_reset(cm) -> None:
+    """Show a diff, prompt, back up the file, then write defaults (defect 5)."""
+    path = cm.CONFIG_PATH
+    if path.exists():
+        print(f"config file: {path}")
+        diffs = cm.diff_from_defaults()
+        if diffs:
+            print("These customizations will be lost:")
+            for k, current, default in diffs:
+                print(
+                    f"  {k} = {cm._display_value(current)}  "
+                    f"(default: {cm._display_value(default)})"
+                )
+        else:
+            print("No customizations differ from the defaults.")
     else:
-        print("Usage: amplifier-workspace config {list,get,set,add,remove,reset}")
+        print(f"No config file at {path}; will write defaults.")
+
+    try:
+        answer = input("Reset configuration to defaults? [y/N] ")
+    except EOFError:
+        sys.exit(1)
+    if answer.strip().lower() != "y":
+        print("Reset cancelled.")
+        return
+
+    backup = cm.backup_config()
+    if backup is not None:
+        print(f"Backed up existing config to: {backup}")
+        print(f"To restore: cp {backup} {path}")
+    cm.write_default_config()
+    print("Configuration reset to defaults.")
 
 
 def _cmd_list() -> None:
@@ -343,19 +442,30 @@ def main(argv: list[str] | None = None) -> None:
             get_p = config_subs.add_parser("get", help="Print a config value.")
             get_p.add_argument("key", help="Dot-notation key (e.g. workspace.bundle).")
 
+            # set accepts `set key value`, `set key=value`, and `set key = value`;
+            # the value tokens are gathered loosely and normalized afterwards.
             set_p = config_subs.add_parser("set", help="Set a config value.")
-            set_p.add_argument("key", help="Dot-notation key.")
-            set_p.add_argument("value", help="Value to set.")
+            set_p.add_argument("key", help="Dot-notation key (or key=value).")
+            set_p.add_argument(
+                "rest",
+                nargs="*",
+                help="Value to set (also accepts key=value / key = value).",
+            )
 
             add_p = config_subs.add_parser("add", help="Add a value to a list setting.")
             add_p.add_argument("key", help="Dot-notation key.")
             add_p.add_argument("value", help="Value to add.")
 
             remove_p = config_subs.add_parser(
-                "remove", help="Remove a value from a list setting."
+                "remove", help="Remove a value from a list setting (or a scalar key)."
             )
             remove_p.add_argument("key", help="Dot-notation key.")
-            remove_p.add_argument("value", help="Value to remove.")
+            remove_p.add_argument(
+                "value",
+                nargs="?",
+                default=None,
+                help="Value to remove (omit to remove a scalar/window key entirely).",
+            )
 
             config_subs.add_parser(
                 "reset", help="Reset configuration to defaults (interactive)."
@@ -435,8 +545,9 @@ def main(argv: list[str] | None = None) -> None:
             elif args.command == "config":
                 _cmd_config(
                     args.action,
-                    getattr(args, "key", None),
-                    getattr(args, "value", None),
+                    key=getattr(args, "key", None),
+                    set_tokens=getattr(args, "rest", None),
+                    value=getattr(args, "value", None),
                 )
             elif args.command == "list":
                 _cmd_list()

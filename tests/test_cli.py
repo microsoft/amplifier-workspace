@@ -77,22 +77,27 @@ def test_cli_upgrade_check_flag():
 # ---------------------------------------------------------------------------
 
 
-def test_cli_config_list_outputs_config(capsys):
-    """'config list' prints configuration values in dot-notation."""
-    mock_config = MagicMock()
-    mock_config.bundle = "my-bundle"
-    mock_config.default_repos = ["https://github.com/test/repo.git"]
-    mock_config.agents_template = ""
-    mock_config.tmux.enabled = False
-    mock_config.tmux.windows = {}
+def _isolate_config(monkeypatch, tmp_path):
+    """Point config_manager at a temp config file and return its path."""
+    from amplifier_workspace import config_manager as cm
 
-    with patch.object(sys, "argv", ["amplifier-workspace", "config", "list"]):
-        with patch("amplifier_workspace.config.load_config", return_value=mock_config):
-            importlib.reload(cli)
-            cli.main()
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setattr(cm, "CONFIG_PATH", config_path)
+    return config_path
+
+
+def test_cli_config_list_outputs_config(capsys, monkeypatch, tmp_path):
+    """'config list' prints configuration values grouped by section."""
+    from amplifier_workspace import config_manager as cm
+
+    config_path = _isolate_config(monkeypatch, tmp_path)
+    cm.write_config_raw({"workspace": {"bundle": "my-bundle"}}, path=config_path)
+
+    cli.main(["config", "list"])
 
     captured = capsys.readouterr()
-    assert "my-bundle" in captured.out or "bundle" in captured.out
+    assert "[workspace]" in captured.out
+    assert "my-bundle" in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -423,3 +428,225 @@ class TestNewWorkspaceFootgun:
         ):
             cli.main(["somebareword", "-k"])
         mock_rw.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# config subcommand UX (defects 1-7)
+# ---------------------------------------------------------------------------
+
+
+def _cfg(monkeypatch, tmp_path, initial=None):
+    """Point config_manager at a temp file (optionally seeded) and return its path."""
+    from amplifier_workspace import config_manager as cm
+
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setattr(cm, "CONFIG_PATH", config_path)
+    if initial is not None:
+        cm.write_config_raw(initial, path=config_path)
+    return config_path
+
+
+class TestConfigSetForms:
+    """Defects 1 & 3 — set accepts key value, key=value, and key = value."""
+
+    def test_set_space_form(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path)
+        cli.main(["config", "set", "tmux.enabled", "true"])
+        out = capsys.readouterr().out
+        assert "tmux.enabled = true" in out
+
+    def test_set_equals_form(self, capsys, monkeypatch, tmp_path):
+        """Defect 1: `set tmux.enabled=True` must not be an argparse error."""
+        _cfg(monkeypatch, tmp_path)
+        cli.main(["config", "set", "tmux.enabled=True"])
+        out = capsys.readouterr().out
+        assert "tmux.enabled = true" in out
+
+    def test_set_stray_equals_form(self, capsys, monkeypatch, tmp_path):
+        """Defect 3: `set tmux.enabled = True` normalizes instead of erroring."""
+        _cfg(monkeypatch, tmp_path)
+        cli.main(["config", "set", "tmux.enabled", "=", "yes"])
+        out = capsys.readouterr().out
+        assert "tmux.enabled = true" in out
+
+    def test_set_string_with_spaces_via_space_form(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path)
+        cli.main(["config", "set", "tmux.windows.main", "vim", "."])
+        out = capsys.readouterr().out
+        assert "tmux.windows.main = vim ." in out
+
+    def test_set_dashed_value_via_equals_form(self, capsys, monkeypatch, tmp_path):
+        """A value with option-like tokens is set via the single-token key=value form."""
+        _cfg(monkeypatch, tmp_path)
+        # In a real shell this is one quoted argv token: "tmux.windows.logs=tail -f x".
+        cli.main(["config", "set", "tmux.windows.logs=tail -f x"])
+        out = capsys.readouterr().out
+        assert "tmux.windows.logs = tail -f x" in out
+
+    def test_set_missing_value_exits_2(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["config", "set", "tmux.enabled"])
+        assert exc_info.value.code == 2
+        assert "needs a value" in capsys.readouterr().err
+
+
+class TestConfigSetValidation:
+    """Defect 2 — typo'd keys rejected loudly; defect c — coercion/list rules."""
+
+    def test_unknown_key_rejected_with_suggestion(self, capsys, monkeypatch, tmp_path):
+        """Defect 2: the silent-write footgun becomes a loud exit-2 with a hint."""
+        _cfg(monkeypatch, tmp_path)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["config", "set", "tmux.enable", "True"])
+        assert exc_info.value.code == 2
+        err = capsys.readouterr().err
+        assert "unknown config key" in err
+        assert "did you mean tmux.enabled?" in err
+        assert "valid keys:" in err
+        # Nothing was written for the bogus key.
+        from amplifier_workspace import config_manager as cm
+
+        assert cm.get_nested_setting("tmux.enable") is None
+
+    def test_bool_coercion_true(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path)
+        cli.main(["config", "set", "tmux.enabled", "yes"])
+        from amplifier_workspace import config_manager as cm
+
+        assert cm.get_nested_setting("tmux.enabled") is True
+
+    def test_bad_bool_exits_2(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["config", "set", "tmux.enabled", "maybe"])
+        assert exc_info.value.code == 2
+        assert "boolean" in capsys.readouterr().err
+
+    def test_list_key_set_rejected(self, capsys, monkeypatch, tmp_path):
+        """Defect c: setting a list key points at add/remove instead."""
+        _cfg(monkeypatch, tmp_path)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["config", "set", "workspace.default_repos", "http://x"])
+        assert exc_info.value.code == 2
+        assert "config add" in capsys.readouterr().err
+
+
+class TestConfigMutationOutput:
+    """Defect 6 & d — every successful mutation prints what happened."""
+
+    def test_set_prints_old_and_new(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"tmux": {"enabled": False}})
+        cli.main(["config", "set", "tmux.enabled", "true"])
+        assert "tmux.enabled = true (was false)" in capsys.readouterr().out
+
+    def test_add_prints_message(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"workspace": {"default_repos": ["r1"]}})
+        cli.main(["config", "add", "workspace.default_repos", "r2"])
+        assert "r2" in capsys.readouterr().out
+
+    def test_remove_prints_message(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"workspace": {"default_repos": ["r1", "r2"]}})
+        cli.main(["config", "remove", "workspace.default_repos", "r1"])
+        assert "r1" in capsys.readouterr().out
+
+
+class TestConfigGetValidation:
+    def test_get_unknown_key_exits_2(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["config", "get", "tmux.enable"])
+        assert exc_info.value.code == 2
+        assert "did you mean tmux.enabled?" in capsys.readouterr().err
+
+    def test_get_list_key_no_python_repr(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"workspace": {"default_repos": ["u1", "u2"]}})
+        cli.main(["config", "get", "workspace.default_repos"])
+        out = capsys.readouterr().out
+        assert "u1" in out and "u2" in out
+        assert "['u1'" not in out
+
+
+class TestConfigListRendering:
+    """Defect 4 — clean grouped output, no repr, unknown keys flagged."""
+
+    def test_bare_config_runs_list(self, capsys, monkeypatch, tmp_path):
+        """Defect e: `config` with no action runs list, not a usage line."""
+        _cfg(monkeypatch, tmp_path, {"workspace": {"bundle": "custom"}})
+        cli.main(["config"])
+        out = capsys.readouterr().out
+        assert "[workspace]" in out
+        assert "Usage:" not in out
+
+    def test_list_no_python_repr_and_indented(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"workspace": {"default_repos": ["u1", "u2"]}})
+        cli.main(["config", "list"])
+        out = capsys.readouterr().out
+        assert "['u1', 'u2']" not in out
+        assert "    u1" in out
+
+    def test_list_flags_unknown_key(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"tmux": {"enable": "True", "enabled": True}})
+        cli.main(["config", "list"])
+        assert "# unknown key (ignored): tmux.enable" in capsys.readouterr().out
+
+
+class TestConfigRemoveScalar:
+    """Defect 7 — a bogus scalar key can be removed to clean it up."""
+
+    def test_remove_scalar_key(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"tmux": {"enable": "True", "enabled": True}})
+        cli.main(["config", "remove", "tmux.enable"])
+        out = capsys.readouterr().out
+        assert "removed" in out
+        from amplifier_workspace import config_manager as cm
+
+        assert cm.get_nested_setting("tmux.enable") is None
+        assert cm.get_nested_setting("tmux.enabled") is True
+
+    def test_remove_unknown_absent_key_exits_2(self, capsys, monkeypatch, tmp_path):
+        _cfg(monkeypatch, tmp_path, {"tmux": {"enabled": True}})
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["config", "remove", "tmux.enable"])
+        assert exc_info.value.code == 2
+        assert "unknown config key" in capsys.readouterr().err
+
+
+class TestConfigReset:
+    """Defect 5 — reset shows diff, backs up, prints restore command."""
+
+    def test_reset_shows_diff_backs_up_and_writes_defaults(
+        self, capsys, monkeypatch, tmp_path
+    ):
+        _cfg(
+            monkeypatch,
+            tmp_path,
+            {"workspace": {"bundle": "custom"}, "tmux": {"enabled": True}},
+        )
+        with patch("builtins.input", return_value="y"):
+            cli.main(["config", "reset"])
+        out = capsys.readouterr().out
+        # Diff of what would be lost.
+        assert "workspace.bundle = custom" in out
+        assert "will be lost" in out.lower()
+        # Backup created + restore hint.
+        assert "Backed up existing config to:" in out
+        assert "To restore: cp" in out
+        backups = list(tmp_path.glob("config.toml.bak-*"))
+        assert len(backups) == 1
+        # Defaults written (bundle back to default).
+        from amplifier_workspace import config_manager as cm
+
+        assert cm.get_nested_setting("workspace.bundle") == "amplifier-dev"
+
+    def test_reset_cancelled_leaves_config_untouched(
+        self, capsys, monkeypatch, tmp_path
+    ):
+        _cfg(monkeypatch, tmp_path, {"workspace": {"bundle": "custom"}})
+        with patch("builtins.input", return_value="n"):
+            cli.main(["config", "reset"])
+        assert "cancelled" in capsys.readouterr().out.lower()
+        from amplifier_workspace import config_manager as cm
+
+        assert cm.get_nested_setting("workspace.bundle") == "custom"
+        assert list(tmp_path.glob("config.toml.bak-*")) == []
