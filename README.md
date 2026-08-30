@@ -62,10 +62,27 @@ amplifier-workspace -f ~/dev/fix-auth    # fresh start (destroy + recreate)
 
 ```bash
 amplifier-workspace setup                # re-run the setup wizard
-amplifier-workspace doctor               # check tool health
-amplifier-workspace upgrade              # self-update
+amplifier-workspace doctor               # check tool + workspace health
+amplifier-workspace doctor ~/dev/fix-auth  # health of a specific workspace
+amplifier-workspace upgrade              # self-update the CLI tool itself
 amplifier-workspace upgrade --check      # check for updates without installing
+amplifier-workspace update ~/dev/fix-auth  # update a workspace's submodules (NOT the tool)
 ```
+
+> `upgrade` self-updates the **amplifier-workspace CLI tool**. `update` refreshes a
+> **workspace's submodules**. They are different verbs for different things.
+
+### Help and version
+
+```bash
+amplifier-workspace help                 # top-level help (also: -h, --help)
+amplifier-workspace --version            # print the installed version
+```
+
+A bare word that is neither a subcommand nor an existing directory (e.g. a
+mistyped `amplifier-workspace hepl`) will **not** silently create a workspace:
+you get a confirmation prompt, or — when run non-interactively — an error
+telling you to pass an existing directory or a path-like name (`./name`).
 
 ### Configuration
 
@@ -146,7 +163,7 @@ $ amplifier-workspace doctor
 amplifier-workspace doctor
 ========================================
   ✓  Python version  3.12.3
-  ✓  amplifier-workspace  0.1.0 (git, up to date)
+  ✓  amplifier-workspace  (git, up to date)
   ✓  git in PATH
   ✓  amplifier in PATH
   ✓  config file  ~/.config/amplifier-workspace/config.toml
@@ -166,16 +183,54 @@ amplifier-workspace doctor
 
 If tmux is disabled in your config, those checks are skipped entirely.
 
+When you point `doctor` at a workspace (or run it from inside one), it adds
+workspace-scoped checks: whether `WORKSPACE-MANIFEST.json` is present and
+parses, how many resources are still active (these gate destroy), and whether
+the workspace's `AGENTS.md` still matches the packaged template. Each warning
+or failure is paired with a `Run: <fix>` remedy.
+
 ## Upgrade
 
-`amplifier-workspace upgrade` detects how the tool was installed and updates accordingly:
+`amplifier-workspace upgrade` self-updates the CLI tool. The reinstall target is
+derived **strictly** from how the tool was actually installed (PEP 610
+provenance), so it never silently reinstalls a different artifact than the one
+you have:
 
-- **git install** (the default `uv tool install git+https://...`): checks remote SHA, reinstalls if newer
-- **editable** (`uv tool install -e .`): tells you to manage updates manually
-- **`--force`**: skip version check, reinstall regardless
-- **`--check`**: report if update available without installing
+- **git install** (the default `uv tool install git+https://...`): reinstalls from
+  the exact recorded URL and tracked branch, checking the remote SHA first
+- **editable** (`uv tool install -e .`): **refused** — an upgrade would clobber your
+  local checkout; it prints the local-dev commands instead (see below)
+- **PyPI / package-manager install**: **refused** — points you at your package
+  manager (`uv tool upgrade` / `pip install --upgrade`)
+- **unknown provenance**: **refused** with an explicit reinstall command
+- **`--force`**: skip the version check, but still honor the provenance rules above
+- **`--check`**: report install status without installing
 
-Always runs `doctor` after a successful upgrade.
+After a successful reinstall it re-reads the metadata and reports the real
+`before → after` version (and says so honestly if nothing moved), then runs
+`doctor`.
+
+`https://github.com/microsoft/amplifier-workspace` is the documented default for
+a **fresh** install only; `upgrade` never substitutes it when your recorded
+provenance says otherwise.
+
+## Developing locally (testing your changes)
+
+Neither `uv tool upgrade amplifier-workspace` nor `amplifier-workspace upgrade`
+will pick up local edits or an unpushed feature branch — both re-fetch from the
+recorded/published source. To run **your** code:
+
+```bash
+# From a local checkout (picks up local edits):
+uv tool install --from /path/to/checkout --force amplifier-workspace
+#   or, from inside the checkout:
+uv tool install -e . --force
+
+# From a pushed branch:
+uv tool install --force git+https://github.com/microsoft/amplifier-workspace@<branch>
+#   or a one-off run without installing:
+uvx --from git+https://github.com/microsoft/amplifier-workspace@<branch> amplifier-workspace
+```
 
 ## Development
 

@@ -67,11 +67,54 @@ def _print_check(label: str, passed: bool | None, detail: str = "") -> None:
         print(f"  {symbol}  {label}{suffix}")
 
 
+def _print_remedy(text: str) -> None:
+    """Print an indented remedy line (muxplex convention: 'Run: <fix>').
+
+    Pairs with a preceding failure/warning line so every problem the doctor
+    surfaces comes with an actionable next step.
+    """
+    print(f"    Run: {text}")
+
+
+def _looks_like_workspace(path: Path) -> bool:
+    """Return True if *path* looks like an amplifier-workspace scaffold.
+
+    Any one of the scaffolded markers is enough — an *older* workspace created
+    before the manifest feature has AGENTS.md and .amplifier/settings.yaml but
+    no WORKSPACE-MANIFEST.json, which is exactly the case the manifest check
+    below wants to warn about.
+    """
+    return (
+        (path / "AGENTS.md").exists()
+        or (path / ".amplifier" / "settings.yaml").exists()
+        or (path / "WORKSPACE-MANIFEST.json").exists()
+    )
+
+
+def _packaged_agents_md() -> bytes | None:
+    """Return the bytes of the packaged AGENTS.md template, or None on failure."""
+    try:
+        import importlib.resources
+
+        pkg_file = (
+            importlib.resources.files("amplifier_workspace") / "templates" / "AGENTS.md"
+        )
+        return pkg_file.read_bytes()
+    except Exception:
+        return None
+
+
 # ── Main health-check runner ──────────────────────────────────────────────────
 
 
-def run_doctor() -> int:
-    """Run all always-on health checks and return 0 (all pass) or 1 (any failure)."""
+def run_doctor(workdir: Path | None = None) -> int:
+    """Run all always-on health checks and return 0 (all pass) or 1 (any failure).
+
+    *workdir* selects the directory for the workspace-scoped checks (manifest
+    presence and AGENTS.md template drift).  When None, the current working
+    directory is used; those checks are skipped entirely unless the target
+    looks like a workspace.
+    """
     failures = 0
 
     print("amplifier-workspace doctor")
@@ -93,11 +136,23 @@ def run_doctor() -> int:
     _print_check("amplifier-workspace", True, version_detail)
 
     # 3. Update check (warning if available, not a failure) ───────────────────
-    update_available, update_msg = _check_for_update_doctor(info)
-    if update_available:
-        print(f"  {_WARN}  update available  {update_msg}")
+    # Honest 3-way: only 'git' installs can actually be compared against a
+    # remote. For editable/pypi/unknown we say "not checkable" rather than
+    # fabricating an update signal (muxplex parity). Warnings never fail doctor.
+    if info["source"] == "git":
+        update_available, update_msg = _check_for_update_doctor(info)
+        if update_available:
+            print(f"  {_WARN}  update available  {update_msg}")
+            _print_remedy("amplifier-workspace upgrade")
+        else:
+            _print_check("up to date", True, update_msg)
     else:
-        _print_check("up to date", True, update_msg)
+        reason = {
+            "editable": "editable install — manage updates manually",
+            "pypi": "pip/PyPI install — no version check",
+            "unknown": "unknown install source",
+        }.get(info["source"], "unrecognized install source")
+        print(f"  {_WARN}  update check  not checkable ({reason})")
 
     # 4. git in PATH (required) ───────────────────────────────────────────────
     git_path = shutil.which("git")
@@ -184,6 +239,78 @@ def run_doctor() -> int:
                 failures += 1
     else:
         _print_check("tmux session", None)
+
+    # 9.5 Workspace-scoped checks (only when the target directory is a workspace)
+    target = workdir if workdir is not None else Path.cwd()
+    if _looks_like_workspace(target):
+        from amplifier_workspace import manifest as _manifest
+
+        print()
+        print(f"  workspace: {target}")
+
+        # Manifest presence / parse / active-resource count
+        mpath = _manifest.manifest_path(target)
+        if not mpath.exists():
+            print(f"  {_WARN}  WORKSPACE-MANIFEST.json  not found")
+            _print_remedy(
+                f"amplifier-workspace manifest {target} --add <kind> <id>"
+                "   (or re-run setup)"
+            )
+        else:
+            try:
+                data = _manifest.load_manifest(target)
+                resources = _manifest.iter_resources(data or {})
+            except _manifest.ManifestError as exc:
+                _print_check("WORKSPACE-MANIFEST.json", False, f"unparseable: {exc}")
+                _print_remedy(
+                    "fix or delete WORKSPACE-MANIFEST.json (it gates destroy)"
+                )
+                failures += 1
+            else:
+                active = [r for r in resources if r.status != "reaped"]
+                if active:
+                    print(
+                        f"  {_WARN}  WORKSPACE-MANIFEST.json  "
+                        f"{len(active)} active resource(s) — these gate destroy"
+                    )
+                    for r in active:
+                        print(f"         - {r.kind}  {r.id}")
+                    _print_remedy(
+                        f"amplifier-workspace manifest {target}   (reap before destroy)"
+                    )
+                else:
+                    _print_check(
+                        "WORKSPACE-MANIFEST.json",
+                        True,
+                        f"{len(resources)} resource(s), 0 active",
+                    )
+
+        # AGENTS.md template drift (workspace copy vs packaged template)
+        agents_path = target / "AGENTS.md"
+        packaged = _packaged_agents_md()
+        if not agents_path.exists():
+            _print_check("AGENTS.md", None)
+        elif config.agents_template:
+            # A custom template is configured, so drift from the packaged
+            # template is expected and not meaningful — don't cry wolf.
+            _print_check("AGENTS.md template", None)
+        elif packaged is None:
+            _print_check("AGENTS.md template", None)
+        else:
+            import hashlib
+
+            ws_hash = hashlib.sha256(agents_path.read_bytes()).hexdigest()
+            pkg_hash = hashlib.sha256(packaged).hexdigest()
+            if ws_hash != pkg_hash:
+                print(
+                    f"  {_WARN}  AGENTS.md differs from the packaged template "
+                    "(older scaffold or local edits)"
+                )
+                _print_remedy(
+                    "diff against the packaged template; intentional edits are fine"
+                )
+            else:
+                _print_check("AGENTS.md template", True, "matches packaged")
 
     # 10. Summary ─────────────────────────────────────────────────────────────
     print()
