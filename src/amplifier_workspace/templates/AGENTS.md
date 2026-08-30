@@ -52,6 +52,18 @@ Don't reconstruct that guidance from memory. Load the `per-repo-conventions` ski
 
 Don't store anything that needs **long-term persistance** in the root directory.
 
+## Tracking External Resources
+
+Some work here spins up resources that live **outside** this directory and will NOT be cleaned up when the workspace is destroyed — a DTU/container, a tmux session, a Gitea instance or repo, a work-tracker project, a cloud resource. Destroying the workspace only removes this directory; it cannot see any of these.
+
+The moment you create one, record it in `WORKSPACE-MANIFEST.json` at the workspace root (create the file if absent):
+
+```json
+{"version": 1, "resources": [{"kind": "dtu", "id": "dtu-a1b2c3d4", "note": "integration test env", "created_at": "2026-01-01T00:00:00Z", "teardown": "amplifier-digital-twin destroy dtu-a1b2c3d4", "status": "active"}]}
+```
+
+When you tear a resource down, set its `status` to `"reaped"` and add a `reaped_at` timestamp — don't delete the entry. Before declaring work done, reconcile the manifest: any entry still `"active"` is unfinished business, and destroying this workspace will refuse to proceed silently past it.
+
 ## Working Memory
 
 @SCRATCH.md

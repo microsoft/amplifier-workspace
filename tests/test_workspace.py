@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from amplifier_workspace.config import WorkspaceConfig, TmuxConfig
+from amplifier_workspace import manifest as _manifest_mod
 from amplifier_workspace.workspace import (
     _launch_with_tmux,
     create_agents_md,
@@ -558,3 +559,195 @@ class TestUpdateWorkspace:
         mock_git.is_git_repo.return_value = False
         with pytest.raises(ValueError, match="not a git repository"):
             update_workspace(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# WORKSPACE-MANIFEST.json scaffolding + destroy gate (both -d and -f)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupWorkspaceCreatesManifest:
+    """setup_workspace must scaffold WORKSPACE-MANIFEST.json idempotently."""
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_creates_manifest_for_new_repo(self, mock_git, tmp_path: Path):
+        """A fresh workspace gets an empty WORKSPACE-MANIFEST.json."""
+        mock_git.is_git_repo.return_value = False
+        config = WorkspaceConfig(default_repos=[])
+        setup_workspace(tmp_path, config)
+        assert (tmp_path / "WORKSPACE-MANIFEST.json").exists()
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_creates_manifest_for_existing_repo(self, mock_git, tmp_path: Path):
+        """An existing workspace (predating this feature) also gets a manifest."""
+        mock_git.is_git_repo.return_value = True
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        assert (tmp_path / "WORKSPACE-MANIFEST.json").exists()
+
+    @patch("amplifier_workspace.workspace._git")
+    def test_does_not_clobber_existing_manifest(self, mock_git, tmp_path: Path):
+        """setup_workspace never overwrites a manifest that already has entries."""
+        mock_git.is_git_repo.return_value = True
+        _manifest_mod.add_resource(tmp_path, "dtu", "dtu-1")
+        config = WorkspaceConfig()
+        setup_workspace(tmp_path, config)
+        data = _manifest_mod.load_manifest(tmp_path)
+        assert len(data["resources"]) == 1
+
+
+class TestRunWorkspaceManifestGate:
+    """Destroy/fresh must gate on active WORKSPACE-MANIFEST.json resources (-d AND -f)."""
+
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_refuses_when_active_resource_and_declined(
+        self, mock_config_path, mock_load_config, mock_rmtree, tmp_path: Path, monkeypatch
+    ):
+        """-d with an active resource and a declined confirmation aborts before rmtree."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        _manifest_mod.add_resource(tmp_path, "dtu", "dtu-1")
+        monkeypatch.setattr("builtins.input", lambda *_: "no")
+
+        config = WorkspaceConfig()
+        with pytest.raises(SystemExit):
+            run_workspace(tmp_path, config, destroy=True)
+        mock_rmtree.assert_not_called()
+
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_proceeds_when_active_resource_and_confirmed(
+        self, mock_config_path, mock_load_config, mock_rmtree, tmp_path: Path, monkeypatch
+    ):
+        """-d with an active resource proceeds once 'orphan' is typed."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        _manifest_mod.add_resource(tmp_path, "dtu", "dtu-1")
+        monkeypatch.setattr("builtins.input", lambda *_: "orphan")
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, destroy=True)
+        mock_rmtree.assert_called_once_with(tmp_path)
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_fresh_refuses_when_active_resource_and_declined(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_rmtree,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """-f (which previously had NO confirmation at all) now also gates on active resources."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        _manifest_mod.add_resource(tmp_path, "tmux", "sess-1")
+        monkeypatch.setattr("builtins.input", lambda *_: "")
+
+        config = WorkspaceConfig()
+        with pytest.raises(SystemExit):
+            run_workspace(tmp_path, config, fresh=True)
+        mock_rmtree.assert_not_called()
+        mock_setup.assert_not_called()
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_fresh_proceeds_when_active_resource_and_confirmed(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_rmtree,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """-f proceeds once 'orphan' is typed."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        _manifest_mod.add_resource(tmp_path, "tmux", "sess-1")
+        monkeypatch.setattr("builtins.input", lambda *_: "orphan")
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, fresh=True)
+        mock_rmtree.assert_called_once_with(tmp_path)
+
+    @patch("amplifier_workspace.workspace._launch_amplifier")
+    @patch("amplifier_workspace.workspace.setup_workspace")
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_fresh_proceeds_without_prompt_when_all_reaped(
+        self,
+        mock_config_path,
+        mock_load_config,
+        mock_rmtree,
+        mock_setup,
+        mock_launch,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """-f keeps its existing no-confirm behavior once every resource is reaped."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        _manifest_mod.add_resource(tmp_path, "tmux", "sess-1")
+        _manifest_mod.reap_resource(tmp_path, "sess-1")
+
+        prompted = {"called": False}
+        monkeypatch.setattr(
+            "builtins.input", lambda *_: prompted.update(called=True) or ""
+        )
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, fresh=True)
+        mock_rmtree.assert_called_once_with(tmp_path)
+        assert prompted["called"] is False
+
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_proceeds_without_prompt_when_manifest_absent(
+        self, mock_config_path, mock_load_config, mock_rmtree, tmp_path: Path, monkeypatch
+    ):
+        """-d keeps its existing (no additional prompt) behavior with no manifest present."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+
+        prompted = {"called": False}
+        monkeypatch.setattr(
+            "builtins.input", lambda *_: prompted.update(called=True) or ""
+        )
+
+        config = WorkspaceConfig()
+        run_workspace(tmp_path, config, destroy=True)
+        mock_rmtree.assert_called_once_with(tmp_path)
+        assert prompted["called"] is False
+
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_requires_confirmation_on_corrupt_manifest(
+        self, mock_config_path, mock_load_config, mock_rmtree, tmp_path: Path, monkeypatch
+    ):
+        """A corrupt WORKSPACE-MANIFEST.json requires the same 'orphan' confirmation."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        (tmp_path / "WORKSPACE-MANIFEST.json").write_text("{not valid json")
+        monkeypatch.setattr("builtins.input", lambda *_: "no")
+
+        config = WorkspaceConfig()
+        with pytest.raises(SystemExit):
+            run_workspace(tmp_path, config, destroy=True)
+        mock_rmtree.assert_not_called()
