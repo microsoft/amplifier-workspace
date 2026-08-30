@@ -12,6 +12,7 @@ from pathlib import Path
 
 from amplifier_workspace.config import WorkspaceConfig
 from amplifier_workspace import git as _git
+from amplifier_workspace import manifest as _manifest
 from amplifier_workspace import tmux
 
 
@@ -110,11 +111,13 @@ def setup_workspace(workdir: Path, config: WorkspaceConfig) -> None:
             _git.update_submodules(workdir)
         create_agents_md(workdir, config)
         create_amplifier_settings(workdir, config)
+        _manifest.create_workspace_manifest(workdir)
         _git.initial_commit(workdir, "chore: initialise workspace")
 
     # Always run idempotently for existing workspaces (no-op if files already exist)
     create_agents_md(workdir, config)
     create_amplifier_settings(workdir, config)
+    _manifest.create_workspace_manifest(workdir)
 
 
 def update_workspace(workdir: Path) -> None:
@@ -234,6 +237,7 @@ def run_workspace(
 
     # 2) destroy flag: kill tmux session first (if enabled), then remove directory
     if destroy and not fresh:
+        _manifest.enforce_destroy_gate(workdir)
         if config.tmux.enabled:
             name = tmux.session_name_from_path(workdir)
             tmux.kill_session(name)
@@ -243,6 +247,7 @@ def run_workspace(
 
     # 3) fresh flag: kill tmux session (if enabled) and remove directory, then fall through
     if fresh:
+        _manifest.enforce_destroy_gate(workdir)
         if config.tmux.enabled:
             name = tmux.session_name_from_path(workdir)
             tmux.kill_session(name)

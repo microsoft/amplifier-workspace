@@ -8,7 +8,7 @@ from pathlib import Path
 
 from amplifier_workspace.config import load_config
 
-_SUBCOMMANDS = ("doctor", "upgrade", "setup", "config", "list", "update")
+_SUBCOMMANDS = ("doctor", "upgrade", "setup", "config", "list", "update", "manifest")
 
 
 def _confirm_destroy(workdir: Path) -> None:
@@ -105,6 +105,35 @@ def _cmd_update(workdir: Path) -> None:
     update_workspace(workdir)
 
 
+def _cmd_manifest(
+    workdir: Path,
+    *,
+    add: list[str] | None,
+    note: str | None,
+    teardown: str | None,
+    reap: str | None,
+) -> None:
+    """List the workspace resource manifest, or add/reap an entry.
+
+    With no flags, prints a listing (active resources first) and always
+    succeeds -- listing never raises.  ``--add``/``--reap`` are for
+    scripted use; the primary writers are agents editing
+    WORKSPACE-MANIFEST.json directly.
+    """
+    from amplifier_workspace import manifest  # noqa: PLC0415
+
+    if add is not None:
+        kind, resource_id = add
+        manifest.add_resource(workdir, kind, resource_id, note=note, teardown=teardown)
+        print(f"added: [{kind}] {resource_id}")
+        return
+    if reap is not None:
+        manifest.reap_resource(workdir, reap)
+        print(f"reaped: {reap}")
+        return
+    print(manifest.format_manifest_listing(workdir))
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -189,6 +218,45 @@ def main(argv: list[str] | None = None) -> None:
                 ),
             )
 
+            # manifest — list, or (optionally) add/reap a resource entry
+            manifest_p = subparsers.add_parser(
+                "manifest",
+                help="List (or edit) the workspace resource manifest.",
+            )
+            manifest_p.add_argument(
+                "workdir",
+                nargs="?",
+                type=Path,
+                default=None,
+                help=(
+                    "Path to the workspace directory. "
+                    "Defaults to the current working directory."
+                ),
+            )
+            manifest_p.add_argument(
+                "--add",
+                nargs=2,
+                metavar=("KIND", "ID"),
+                default=None,
+                help="Add a resource entry: --add <kind> <id>.",
+            )
+            manifest_p.add_argument(
+                "--note",
+                default=None,
+                help="Optional note to attach when using --add.",
+            )
+            manifest_p.add_argument(
+                "--teardown",
+                default=None,
+                help="Optional teardown-command hint to attach when using --add.",
+            )
+            manifest_p.add_argument(
+                "--reap",
+                metavar="ID",
+                default=None,
+                help="Mark the resource with this id as reaped.",
+            )
+
             args = sub_parser.parse_args()
 
             if args.command == "setup":
@@ -212,6 +280,19 @@ def main(argv: list[str] | None = None) -> None:
                     else Path.cwd()
                 )
                 _cmd_update(workdir)
+            elif args.command == "manifest":
+                workdir = (
+                    Path(args.workdir).expanduser().resolve()
+                    if args.workdir is not None
+                    else Path.cwd()
+                )
+                _cmd_manifest(
+                    workdir,
+                    add=args.add,
+                    note=args.note,
+                    teardown=args.teardown,
+                    reap=args.reap,
+                )
             return
 
         parser = argparse.ArgumentParser(

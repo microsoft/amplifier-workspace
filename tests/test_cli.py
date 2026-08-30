@@ -180,3 +180,112 @@ def test_cli_update_defaults_to_cwd(monkeypatch, tmp_path):
             importlib.reload(cli)
             cli.main()
     mock_update.assert_called_once_with(tmp_path.resolve())
+
+
+# ---------------------------------------------------------------------------
+# manifest subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_cli_manifest_lists_absent_manifest(tmp_path, capsys):
+    """'manifest <workdir>' with no WORKSPACE-MANIFEST.json prints a friendly message
+    and exits 0 (never raises)."""
+    with patch.object(sys, "argv", ["amplifier-workspace", "manifest", str(tmp_path)]):
+        importlib.reload(cli)
+        cli.main()
+    captured = capsys.readouterr()
+    assert "No WORKSPACE-MANIFEST.json" in captured.out
+
+
+def test_cli_manifest_defaults_to_cwd(monkeypatch, tmp_path, capsys):
+    """'manifest' with no workdir argument defaults to the current working directory."""
+    monkeypatch.chdir(tmp_path)
+    with patch.object(sys, "argv", ["amplifier-workspace", "manifest"]):
+        importlib.reload(cli)
+        cli.main()
+    captured = capsys.readouterr()
+    assert "No WORKSPACE-MANIFEST.json" in captured.out
+
+
+def test_cli_manifest_add_then_list(tmp_path, capsys):
+    """'manifest --add' creates an entry; a subsequent listing shows it as active."""
+    with patch.object(
+        sys,
+        "argv",
+        ["amplifier-workspace", "manifest", str(tmp_path), "--add", "dtu", "dtu-1"],
+    ):
+        importlib.reload(cli)
+        cli.main()
+
+    with patch.object(sys, "argv", ["amplifier-workspace", "manifest", str(tmp_path)]):
+        importlib.reload(cli)
+        cli.main()
+
+    captured = capsys.readouterr()
+    assert "dtu-1" in captured.out
+    assert "1 active" in captured.out
+
+
+def test_cli_manifest_add_with_note_and_teardown(tmp_path, capsys):
+    """'manifest --add ... --note ... --teardown ...' records both optional fields."""
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "amplifier-workspace",
+            "manifest",
+            str(tmp_path),
+            "--add",
+            "gitea-repo",
+            "myorg/myrepo",
+            "--note",
+            "scratch",
+            "--teardown",
+            "delete via UI",
+        ],
+    ):
+        importlib.reload(cli)
+        cli.main()
+
+    from amplifier_workspace import manifest
+
+    data = manifest.load_manifest(tmp_path)
+    entry = data["resources"][0]
+    assert entry["note"] == "scratch"
+    assert entry["teardown"] == "delete via UI"
+
+
+def test_cli_manifest_reap(tmp_path, capsys):
+    """'manifest --reap <id>' marks a previously added resource reaped."""
+    from amplifier_workspace import manifest
+
+    manifest.add_resource(tmp_path, "dtu", "dtu-1")
+
+    with patch.object(
+        sys,
+        "argv",
+        ["amplifier-workspace", "manifest", str(tmp_path), "--reap", "dtu-1"],
+    ):
+        importlib.reload(cli)
+        cli.main()
+
+    captured = capsys.readouterr()
+    assert "reaped" in captured.out.lower()
+    data = manifest.load_manifest(tmp_path)
+    assert data["resources"][0]["status"] == "reaped"
+
+
+def test_cli_manifest_reap_unknown_id_exits_nonzero(tmp_path):
+    """'manifest --reap' on an unknown id surfaces as a CLI error (nonzero exit)."""
+    from amplifier_workspace import manifest
+
+    manifest.add_resource(tmp_path, "dtu", "dtu-1")
+
+    with patch.object(
+        sys,
+        "argv",
+        ["amplifier-workspace", "manifest", str(tmp_path), "--reap", "does-not-exist"],
+    ):
+        importlib.reload(cli)
+        with pytest.raises(SystemExit):
+            cli.main()

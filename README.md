@@ -95,6 +95,20 @@ When you run `amplifier-workspace ~/dev/fix-auth`, it creates:
 
 The workspace root is a local-only git repo -- use it for task-lifetime commits and reverts. The submodule directories are real GitHub repos -- commits and pushes there persist upstream.
 
+## Workspace Manifest
+
+Workspaces are ephemeral and self-contained, but sessions working inside one often spin up resources that live *outside* the workspace directory -- a DTU, a tmux session, a Gitea repo, a work-tracker project, a cloud resource. `-d`/`-f` deletes the directory; it has no way to reach those.
+
+Each workspace tracks such resources in `WORKSPACE-MANIFEST.json` at its root. Agents are instructed (via `AGENTS.md`) to record a resource the moment they create it, and mark it `"reaped"` once torn down.
+
+Before destroying a workspace, `amplifier-workspace` reads this manifest. If any resource is still `"active"` (or the manifest can't be parsed), destruction is refused until you type `orphan` to explicitly acknowledge it will be left running -- the tool never tears resources down itself, it just refuses to lose track of them silently.
+
+```bash
+amplifier-workspace manifest ~/dev/fix-auth               # list tracked resources
+amplifier-workspace manifest ~/dev/fix-auth --add dtu dtu-a1b2c3d4 --note "integration test"
+amplifier-workspace manifest ~/dev/fix-auth --reap dtu-a1b2c3d4
+```
+
 ## Two Tiers
 
 ### Tier 1: Workspace Only (default)
