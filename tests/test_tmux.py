@@ -10,6 +10,7 @@ import pytest
 from amplifier_workspace.config import TmuxConfig
 from amplifier_workspace.tmux import (
     SESSION_NAME_MAX_FALLBACK,
+    SessionNameEmptyError,
     SessionNameTooLongError,
     _main_rcfile_content,
     _shell_rcfile_content,
@@ -223,6 +224,109 @@ class TestSessionNameOverLimitIsExplicit:
         raise AssertionError(
             f"expected a loud refusal, got a silently different name: {result!r}"
         )
+
+
+class TestSessionNameIsNeverEmpty:
+    """A path must never yield '' -- tmux reads an empty name as another session.
+
+    Measured on the reference host (2026-09-04, tmux 3.4, dedicated socket):
+    `new-session -s ''` is rejected (rc=1), while `has-session -t ''` returns 0
+    and `kill-session -t ''` returns 0 *and kills the most recently used
+    session*.  So an empty name is not inert -- it silently retargets.
+    """
+
+    def test_filesystem_root_raises(self):
+        """`/` has no basename at all; it must refuse, not return ''."""
+        with pytest.raises(SessionNameEmptyError):
+            session_name_from_path(Path("/"))
+
+    def test_dot_only_basename_raises(self, tmp_path):
+        """A real directory literally named '...' sanitizes to nothing."""
+        pathological = tmp_path / "..."
+        pathological.mkdir()  # ext4/APFS both accept this name
+        with pytest.raises(SessionNameEmptyError):
+            session_name_from_path(pathological)
+
+    @pytest.mark.parametrize(
+        "basename",
+        ["...", " ", "-", "--", ":", ":::", ". .", "- -", ".."],
+    )
+    def test_never_returns_the_empty_string(self, basename):
+        """Every all-separator basename either names a session or refuses."""
+        path = Path("/home/user") / basename
+        try:
+            result = session_name_from_path(path)
+        except SessionNameEmptyError:
+            return  # correct: refused loudly
+        assert result != "", f"{basename!r} produced an empty session name"
+
+    def test_error_is_a_value_error_and_names_the_path(self):
+        """Same contract as SessionNameTooLongError: a ValueError the CLI prints."""
+        assert issubclass(SessionNameEmptyError, ValueError)
+        with pytest.raises(SessionNameEmptyError) as excinfo:
+            session_name_from_path(Path("/home/user/..."))
+        assert "/home/user/..." in str(excinfo.value)
+
+    def test_dot_resolves_to_the_real_directory_name(self, tmp_path, monkeypatch):
+        """'.' is positional, not nameless -- resolve it instead of refusing."""
+        workdir = tmp_path / "myproject"
+        workdir.mkdir()
+        monkeypatch.chdir(workdir)
+        assert session_name_from_path(Path(".")) == "myproject"
+
+    def test_dotdot_resolves_to_the_parent_directory_name(self, tmp_path, monkeypatch):
+        """'..' likewise names a real directory once resolved."""
+        parent = tmp_path / "outerproject"
+        child = parent / "inner"
+        child.mkdir(parents=True)
+        monkeypatch.chdir(child)
+        assert session_name_from_path(Path("..")) == "outerproject"
+
+    def test_resolution_does_not_rename_an_ordinary_path(self, tmp_path):
+        """Resolution is a last resort; a normal basename is untouched by it."""
+        assert session_name_from_path(tmp_path / "plain-name") == "plain-name"
+
+    def test_create_session_refuses_before_touching_tmux(self, tmp_path):
+        """The create path fails on the name, not on a CalledProcessError."""
+        pathological = tmp_path / "..."
+        pathological.mkdir()
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(SessionNameEmptyError):
+                create_session(pathological, TmuxConfig())
+        mock_run.assert_not_called()
+
+
+class TestEmptySessionNameNeverReachesTmux:
+    """The guard on every function that takes a name, not just the derivation.
+
+    `-t ''` is not "no session": it resolves to the most recently used one, so
+    an empty name reaching tmux operates on -- or kills -- a bystander.
+    """
+
+    def test_session_exists_refuses_empty_name(self):
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(SessionNameEmptyError):
+                session_exists("")
+        mock_run.assert_not_called()
+
+    def test_kill_session_refuses_empty_name(self):
+        """The destructive case: kill-session -t '' kills an unrelated session."""
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(SessionNameEmptyError):
+                kill_session("")
+        mock_run.assert_not_called()
+
+    def test_attach_session_refuses_empty_name(self):
+        with patch("subprocess.run") as mock_run, patch("os.execvp") as mock_execvp:
+            with pytest.raises(SessionNameEmptyError):
+                attach_session("")
+        mock_run.assert_not_called()
+        mock_execvp.assert_not_called()
+
+    def test_message_explains_the_retargeting(self):
+        with pytest.raises(SessionNameEmptyError) as excinfo:
+            kill_session("")
+        assert "most recently used session" in str(excinfo.value)
 
 
 class TestSessionExists:
