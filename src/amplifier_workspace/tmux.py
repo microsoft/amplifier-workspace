@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from amplifier_workspace.config import TmuxConfig
 
 __all__ = [
-    "SESSION_NAME_MAX",
+    "SESSION_NAME_MAX_FALLBACK",
+    "SessionNameTooLongError",
+    "session_name_max",
     "session_name_from_path",
     "session_exists",
     "kill_session",
@@ -22,8 +24,47 @@ __all__ = [
     "attach_session",
 ]
 
-SESSION_NAME_MAX: int = 32
+# ---------------------------------------------------------------------------
+# Session-name length
+# ---------------------------------------------------------------------------
+#
+# A session name is derived from the workspace *directory's* basename, so the
+# only real ceiling is the filesystem's own per-component limit (NAME_MAX) --
+# and NAME_MAX is counted in BYTES, not characters.
+#
+# Measured on the reference host (2026-09-04, tmux 3.4, ext4):
+#
+#   tmux   No session-name length limit found.  Names of 41, 64, 128, 200 and
+#          255 characters each created rc=0 and round-tripped byte-exact via
+#          `list-sessions`; a 255-BYTE multibyte name also worked.
+#   ext4   NAME_MAX = 255 BYTES.  mkdir of 255 ASCII chars succeeds and 256
+#          fails (ENAMETOOLONG); mkdir of 85 CJK chars (255 bytes) succeeds and
+#          86 CJK chars (258 bytes) fails -- proving the limit counts bytes.
+#
+# So the cap is asked of the filesystem at call time rather than hardcoded.  The
+# previous hardcoded 32 protected nothing: ~/dev on the reporting host already
+# holds 41-character directories that tmux and ext4 both handle without
+# complaint, while the cap silently renamed every session longer than 32.
+
+SESSION_NAME_MAX_FALLBACK: int = 255
+"""Cap in BYTES used only when the platform cannot report its own NAME_MAX.
+
+This is *not* the applied cap -- :func:`session_name_max` is.  255 is the
+per-component limit shared by ext4, APFS and NTFS, so it is the least
+surprising value to assume when ``os.pathconf`` is unavailable (Windows) or
+declines to answer.
+"""
+
 _RESERVED_WINDOW_NAMES: frozenset[str] = frozenset({"amplifier", "shell"})
+
+
+class SessionNameTooLongError(ValueError):
+    """Raised when a derived session name does not fit the filesystem's NAME_MAX.
+
+    Subclasses ``ValueError`` so existing ``except ValueError`` handling still
+    catches it, and so the CLI's top-level handler reports it as a plain
+    ``error: ...`` line rather than a traceback.
+    """
 
 
 def attach_session(name: str) -> None:
@@ -51,14 +92,60 @@ def attach_session(name: str) -> None:
             os.execvp("tmux", ["tmux", "attach-session", "-t", name])
 
 
-def session_name_from_path(workdir: Path) -> str:
+def _nearest_existing_dir(path: Path) -> Path | None:
+    """Return *path* or its closest existing ancestor directory, else None."""
+    for candidate in (path, *path.parents):
+        try:
+            if candidate.is_dir():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def session_name_max(path: Path | None = None) -> int:
+    """Return the maximum session-name length in BYTES for *path*'s filesystem.
+
+    Reads the real limit via ``os.pathconf(dir, "PC_NAME_MAX")`` on the nearest
+    existing ancestor of *path*, because the workspace may live on a different
+    filesystem than the root one.  Falls back to
+    :data:`SESSION_NAME_MAX_FALLBACK` when the platform has no ``os.pathconf``
+    (Windows), does not recognise the name, or reports an indeterminate limit.
+    """
+    probe = _nearest_existing_dir(path) if path is not None else None
+    if probe is not None:
+        try:
+            reported = os.pathconf(probe, "PC_NAME_MAX")
+        except (AttributeError, KeyError, ValueError, OSError):
+            reported = -1
+        if reported > 0:
+            return int(reported)
+    return SESSION_NAME_MAX_FALLBACK
+
+
+def session_name_from_path(workdir: Path, *, name_max: int | None = None) -> str:
     """Derive a tmux session name from a workspace directory path.
 
     Uses the directory's basename, sanitized for tmux compatibility:
     - Replaces spaces, colons, dots, and slashes with dashes
     - Collapses repeated dashes into a single dash
     - Strips leading/trailing dashes
-    - Truncates to SESSION_NAME_MAX (32) characters
+
+    The result is then checked -- in BYTES, since NAME_MAX counts bytes -- against
+    the filesystem's own limit (see :func:`session_name_max`).  A name that does
+    not fit raises :class:`SessionNameTooLongError`.
+
+    There is deliberately **no truncation**.  Silently returning a name other
+    than the caller's directory is the bug this replaces: callers build session
+    keys from the name they asked for, so a quiet rename makes every downstream
+    lookup miss.  Because a directory cannot exist unless its basename already
+    fits NAME_MAX -- and sanitizing only ever replaces one ASCII byte with
+    another, collapses, or strips -- the error is unreachable for a workspace
+    that exists on disk.  It fires only for a path that could not have been
+    created in the first place, and says so.
+
+    *name_max* overrides the derived cap (in bytes).  Intended for tests and for
+    callers that already know their own limit.
     """
     name = workdir.name  # handles trailing slashes correctly via Path.name
 
@@ -71,8 +158,16 @@ def session_name_from_path(workdir: Path) -> str:
     # Strip leading/trailing dashes
     name = name.strip("-")
 
-    # Truncate to SESSION_NAME_MAX
-    return name[:SESSION_NAME_MAX]
+    limit = session_name_max(workdir.parent) if name_max is None else name_max
+    encoded_length = len(name.encode("utf-8"))
+    if encoded_length > limit:
+        raise SessionNameTooLongError(
+            f"session name derived from {str(workdir)!r} is {encoded_length} bytes "
+            f"({len(name)} characters), over this filesystem's {limit}-byte name "
+            "limit (NAME_MAX). Rename the workspace directory to something shorter."
+        )
+
+    return name
 
 
 def session_exists(name: str) -> bool:
