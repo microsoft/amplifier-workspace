@@ -5,9 +5,13 @@ import stat
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from amplifier_workspace.config import TmuxConfig
 from amplifier_workspace.tmux import (
-    SESSION_NAME_MAX,
+    SESSION_NAME_MAX_FALLBACK,
+    SessionNameEmptyError,
+    SessionNameTooLongError,
     _main_rcfile_content,
     _shell_rcfile_content,
     _window_rcfile_content,
@@ -17,6 +21,7 @@ from amplifier_workspace.tmux import (
     kill_session,
     session_exists,
     session_name_from_path,
+    session_name_max,
 )
 
 
@@ -31,12 +36,36 @@ class TestSessionNameFromPath:
         result = session_name_from_path(Path("/home/user/myproject/"))
         assert result == "myproject"
 
-    def test_long_name_truncated_to_32(self):
-        """A name longer than SESSION_NAME_MAX (32) is truncated to exactly 32 chars."""
-        long_name = "a" * 50
+    def test_41_char_name_round_trips_uncut(self):
+        """A 41-char basename survives whole -- the exact case the old 32 cap broke.
+
+        Both names below are real directories in the reporting user's ~/dev, so
+        the filesystem and tmux demonstrably accept them; only the hardcoded cap
+        did not.
+        """
+        for long_name in (
+            "context-intelligence-query-issues-team-ci",
+            "amplifier-module-tool-document-builder-go",
+        ):
+            assert len(long_name) == 41
+            result = session_name_from_path(Path(f"/home/user/{long_name}"))
+            assert result == long_name, "41-char basename must not be truncated"
+
+    def test_33_char_name_round_trips_uncut(self):
+        """The reported symptom: '...-team-ci' at 33 chars lost its final 'i' at 32."""
+        long_name = "home-assistant-smart-tool-team-ci"
+        assert len(long_name) == 33
         result = session_name_from_path(Path(f"/home/user/{long_name}"))
-        assert len(result) == SESSION_NAME_MAX
-        assert result == "a" * SESSION_NAME_MAX
+        assert result == long_name
+        assert not result.endswith("-"), "must not be cut mid-word leaving a dash"
+
+    def test_name_up_to_filesystem_limit_is_kept_whole(self, tmp_path):
+        """A name exactly at the filesystem's NAME_MAX is returned unchanged."""
+        limit = session_name_max(tmp_path)
+        long_name = "a" * limit
+        result = session_name_from_path(tmp_path / long_name)
+        assert result == long_name
+        assert len(result.encode("utf-8")) == limit
 
     def test_spaces_replaced(self):
         """Spaces in directory name are replaced with dashes."""
@@ -57,6 +86,247 @@ class TestSessionNameFromPath:
         """The return type is always str."""
         result = session_name_from_path(Path("/some/path"))
         assert isinstance(result, str)
+
+
+class TestSessionNameMax:
+    """The cap must be DERIVED from the filesystem, not a hardcoded literal."""
+
+    def test_matches_filesystem_pathconf(self, tmp_path):
+        """session_name_max reports the filesystem's own PC_NAME_MAX."""
+        assert session_name_max(tmp_path) == os.pathconf(tmp_path, "PC_NAME_MAX")
+
+    def test_derived_value_is_not_the_fallback_literal_by_luck(self, tmp_path):
+        """The value comes from pathconf, not from the fallback constant.
+
+        Patch pathconf to a value that is deliberately NOT the fallback and
+        confirm the function follows the filesystem rather than the literal.
+        """
+        with patch("amplifier_workspace.tmux.os.pathconf", return_value=143):
+            assert session_name_max(tmp_path) == 143
+        assert 143 != SESSION_NAME_MAX_FALLBACK
+
+    def test_probes_nearest_existing_ancestor(self, tmp_path):
+        """A not-yet-created workspace path resolves to its nearest existing parent."""
+        missing = tmp_path / "does-not-exist" / "nor-this"
+        with patch(
+            "amplifier_workspace.tmux.os.pathconf", return_value=143
+        ) as mock_pathconf:
+            assert session_name_max(missing) == 143
+        assert mock_pathconf.call_args.args[0] == tmp_path
+
+    def test_falls_back_when_pathconf_unavailable(self, tmp_path):
+        """No os.pathconf (Windows) -> documented fallback, not a crash."""
+        with patch(
+            "amplifier_workspace.tmux.os.pathconf",
+            side_effect=AttributeError("no pathconf"),
+        ):
+            assert session_name_max(tmp_path) == SESSION_NAME_MAX_FALLBACK
+
+    def test_falls_back_when_pathconf_errors(self, tmp_path):
+        """An OSError from pathconf falls back rather than propagating."""
+        with patch("amplifier_workspace.tmux.os.pathconf", side_effect=OSError("nope")):
+            assert session_name_max(tmp_path) == SESSION_NAME_MAX_FALLBACK
+
+    def test_falls_back_when_limit_is_indeterminate(self, tmp_path):
+        """pathconf returning -1 (indeterminate) falls back."""
+        with patch("amplifier_workspace.tmux.os.pathconf", return_value=-1):
+            assert session_name_max(tmp_path) == SESSION_NAME_MAX_FALLBACK
+
+    def test_falls_back_with_no_path(self):
+        """Called with no path there is nothing to probe -- use the fallback."""
+        assert session_name_max() == SESSION_NAME_MAX_FALLBACK
+
+    def test_fallback_is_255(self):
+        """The documented fallback is the ext4/APFS/NTFS component limit."""
+        assert SESSION_NAME_MAX_FALLBACK == 255
+
+
+class TestSessionNameByteLimit:
+    """NAME_MAX counts BYTES. A character-based check would be wrong."""
+
+    # 3 bytes each in UTF-8. 85 chars = 255 bytes (fits ext4); 86 = 258 (does not).
+    CJK = "\u4e2d"
+
+    def test_multibyte_name_at_exact_byte_limit_is_accepted(self):
+        """85 CJK chars == 255 bytes: right at the limit, kept whole."""
+        name = self.CJK * 85
+        assert len(name.encode("utf-8")) == 255
+        result = session_name_from_path(Path(f"/home/user/{name}"), name_max=255)
+        assert result == name
+
+    def test_multibyte_name_over_byte_limit_is_rejected(self):
+        """86 CJK chars == 258 bytes: over the limit even though 86 < 255 chars.
+
+        This is the test that a character-based check would wrongly pass.
+        """
+        name = self.CJK * 86
+        assert len(name) == 86, "character count alone would look fine (86 < 255)"
+        assert len(name.encode("utf-8")) == 258, "but the byte count is over 255"
+        with pytest.raises(SessionNameTooLongError):
+            session_name_from_path(Path(f"/home/user/{name}"), name_max=255)
+
+    def test_multibyte_name_matches_real_filesystem_behaviour(self, tmp_path):
+        """The accept/reject boundary matches what the filesystem actually does."""
+        limit = session_name_max(tmp_path)
+        fits = self.CJK * (limit // 3)
+        (tmp_path / fits).mkdir()  # the filesystem agrees this fits
+        assert session_name_from_path(tmp_path / fits) == fits
+
+        over = self.CJK * (limit // 3 + 1)
+        with pytest.raises(OSError):
+            (tmp_path / over).mkdir()  # the filesystem agrees this does not
+        with pytest.raises(SessionNameTooLongError):
+            session_name_from_path(tmp_path / over)
+
+    def test_accepted_name_is_never_split_mid_character(self):
+        """Whatever comes back is always decodable -- no partial codepoints.
+
+        Nothing is truncated, so this holds by construction; the test pins the
+        property so a future truncation cannot reintroduce a broken filename.
+        """
+        name = self.CJK * 85
+        result = session_name_from_path(Path(f"/home/user/{name}"), name_max=255)
+        assert result.encode("utf-8").decode("utf-8") == result
+
+    def test_ascii_boundary_exact_and_over(self):
+        """ASCII at the cap is accepted; one byte over is rejected."""
+        assert session_name_from_path(Path("/home/user/" + "a" * 255), name_max=255)
+        with pytest.raises(SessionNameTooLongError):
+            session_name_from_path(Path("/home/user/" + "a" * 256), name_max=255)
+
+
+class TestSessionNameOverLimitIsExplicit:
+    """Over-limit fails loudly with an actionable message -- never a silent rename."""
+
+    def test_raises_value_error_subclass(self):
+        """SessionNameTooLongError is a ValueError, so existing handlers catch it."""
+        assert issubclass(SessionNameTooLongError, ValueError)
+        with pytest.raises(ValueError):
+            session_name_from_path(Path("/home/user/" + "a" * 300), name_max=255)
+
+    def test_message_names_the_size_the_limit_and_the_path(self):
+        """The error tells the user what was too long, by how much, and where."""
+        with pytest.raises(SessionNameTooLongError) as excinfo:
+            session_name_from_path(Path("/home/user/" + "a" * 300), name_max=255)
+        message = str(excinfo.value)
+        assert "300 bytes" in message
+        assert "255-byte" in message
+        assert "NAME_MAX" in message
+        assert "/home/user/" in message
+
+    def test_does_not_return_a_truncated_name(self):
+        """The old behaviour -- quietly returning a shorter name -- must not return."""
+        long_path = Path("/home/user/" + "a" * 300)
+        try:
+            result = session_name_from_path(long_path, name_max=255)
+        except SessionNameTooLongError:
+            return  # correct: refused rather than renamed
+        raise AssertionError(
+            f"expected a loud refusal, got a silently different name: {result!r}"
+        )
+
+
+class TestSessionNameIsNeverEmpty:
+    """A path must never yield '' -- tmux reads an empty name as another session.
+
+    Measured on the reference host (2026-09-04, tmux 3.4, dedicated socket):
+    `new-session -s ''` is rejected (rc=1), while `has-session -t ''` returns 0
+    and `kill-session -t ''` returns 0 *and kills the most recently used
+    session*.  So an empty name is not inert -- it silently retargets.
+    """
+
+    def test_filesystem_root_raises(self):
+        """`/` has no basename at all; it must refuse, not return ''."""
+        with pytest.raises(SessionNameEmptyError):
+            session_name_from_path(Path("/"))
+
+    def test_dot_only_basename_raises(self, tmp_path):
+        """A real directory literally named '...' sanitizes to nothing."""
+        pathological = tmp_path / "..."
+        pathological.mkdir()  # ext4/APFS both accept this name
+        with pytest.raises(SessionNameEmptyError):
+            session_name_from_path(pathological)
+
+    @pytest.mark.parametrize(
+        "basename",
+        ["...", " ", "-", "--", ":", ":::", ". .", "- -", ".."],
+    )
+    def test_never_returns_the_empty_string(self, basename):
+        """Every all-separator basename either names a session or refuses."""
+        path = Path("/home/user") / basename
+        try:
+            result = session_name_from_path(path)
+        except SessionNameEmptyError:
+            return  # correct: refused loudly
+        assert result != "", f"{basename!r} produced an empty session name"
+
+    def test_error_is_a_value_error_and_names_the_path(self):
+        """Same contract as SessionNameTooLongError: a ValueError the CLI prints."""
+        assert issubclass(SessionNameEmptyError, ValueError)
+        with pytest.raises(SessionNameEmptyError) as excinfo:
+            session_name_from_path(Path("/home/user/..."))
+        assert "/home/user/..." in str(excinfo.value)
+
+    def test_dot_resolves_to_the_real_directory_name(self, tmp_path, monkeypatch):
+        """'.' is positional, not nameless -- resolve it instead of refusing."""
+        workdir = tmp_path / "myproject"
+        workdir.mkdir()
+        monkeypatch.chdir(workdir)
+        assert session_name_from_path(Path(".")) == "myproject"
+
+    def test_dotdot_resolves_to_the_parent_directory_name(self, tmp_path, monkeypatch):
+        """'..' likewise names a real directory once resolved."""
+        parent = tmp_path / "outerproject"
+        child = parent / "inner"
+        child.mkdir(parents=True)
+        monkeypatch.chdir(child)
+        assert session_name_from_path(Path("..")) == "outerproject"
+
+    def test_resolution_does_not_rename_an_ordinary_path(self, tmp_path):
+        """Resolution is a last resort; a normal basename is untouched by it."""
+        assert session_name_from_path(tmp_path / "plain-name") == "plain-name"
+
+    def test_create_session_refuses_before_touching_tmux(self, tmp_path):
+        """The create path fails on the name, not on a CalledProcessError."""
+        pathological = tmp_path / "..."
+        pathological.mkdir()
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(SessionNameEmptyError):
+                create_session(pathological, TmuxConfig())
+        mock_run.assert_not_called()
+
+
+class TestEmptySessionNameNeverReachesTmux:
+    """The guard on every function that takes a name, not just the derivation.
+
+    `-t ''` is not "no session": it resolves to the most recently used one, so
+    an empty name reaching tmux operates on -- or kills -- a bystander.
+    """
+
+    def test_session_exists_refuses_empty_name(self):
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(SessionNameEmptyError):
+                session_exists("")
+        mock_run.assert_not_called()
+
+    def test_kill_session_refuses_empty_name(self):
+        """The destructive case: kill-session -t '' kills an unrelated session."""
+        with patch("subprocess.run") as mock_run:
+            with pytest.raises(SessionNameEmptyError):
+                kill_session("")
+        mock_run.assert_not_called()
+
+    def test_attach_session_refuses_empty_name(self):
+        with patch("subprocess.run") as mock_run, patch("os.execvp") as mock_execvp:
+            with pytest.raises(SessionNameEmptyError):
+                attach_session("")
+        mock_run.assert_not_called()
+        mock_execvp.assert_not_called()
+
+    def test_message_explains_the_retargeting(self):
+        with pytest.raises(SessionNameEmptyError) as excinfo:
+            kill_session("")
+        assert "most recently used session" in str(excinfo.value)
 
 
 class TestSessionExists:

@@ -48,3 +48,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Lockfile: this repo has never tracked one; a lane accidentally added it.
+uv.lock
