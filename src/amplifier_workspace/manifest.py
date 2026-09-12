@@ -10,10 +10,12 @@ orphaned when the workspace is destroyed.
 ``WORKSPACE-MANIFEST.json`` (at the workspace root) is a per-workspace ledger
 of such resources.  Agents working in the workspace are expected to record a
 resource the moment they create it (see ``templates/AGENTS.md``) and mark it
-``"reaped"`` once torn down.  Before any destroy (``-d`` or ``-f``), this
-module gates the ``rmtree``: if any entry is still unreaped -- or the
-manifest cannot be parsed at all -- destruction is refused until the operator
-explicitly acknowledges the orphaning by typing "orphan".
+``"reaped"`` once this workspace tears it down.  An externally owned resource
+independently confirmed absent is instead ``"observed_absent"``. Before any
+destroy (``-d`` or ``-f``), this module gates the ``rmtree``: if any entry is
+still active -- or the manifest cannot be parsed at all -- destruction is
+refused until the operator explicitly acknowledges the orphaning by typing
+"orphan".
 
 This module is pure bookkeeping and a gate.  It never tears a resource down
 itself -- mechanism, not policy.  The manifest is tossed along with the rest
@@ -32,8 +34,14 @@ from pathlib import Path
 MANIFEST_FILENAME = "WORKSPACE-MANIFEST.json"
 MANIFEST_VERSION = 1
 
-_VALID_STATUSES = ("active", "reaped")
+VALID_STATUSES = ("active", "reaped", "observed_absent")
+_TERMINAL_STATUSES = frozenset({"reaped", "observed_absent"})
 _CONFIRM_WORD = "orphan"
+
+
+def is_terminal_status(status: str) -> bool:
+    """Return whether *status* cannot orphan a resource on workspace destruction."""
+    return status in _TERMINAL_STATUSES
 
 
 class ManifestError(Exception):
@@ -56,6 +64,7 @@ class ManifestResource:
     teardown: str | None = None
     status: str = "active"
     reaped_at: str | None = None
+    observed_absent_at: str | None = None
 
     def to_dict(self) -> dict:
         """Serialize in the canonical key order used in WORKSPACE-MANIFEST.json."""
@@ -67,6 +76,7 @@ class ManifestResource:
             "teardown": self.teardown,
             "status": self.status,
             "reaped_at": self.reaped_at,
+            "observed_absent_at": self.observed_absent_at,
         }
 
     @classmethod
@@ -78,7 +88,7 @@ class ManifestResource:
         entry can never silently slip past the destroy gate by omission.
         """
         status = data.get("status", "active")
-        if status not in _VALID_STATUSES:
+        if status not in VALID_STATUSES:
             status = "active"
         return cls(
             kind=str(data.get("kind", "unknown")),
@@ -88,6 +98,7 @@ class ManifestResource:
             teardown=data.get("teardown"),
             status=status,
             reaped_at=data.get("reaped_at"),
+            observed_absent_at=data.get("observed_absent_at"),
         )
 
 
@@ -248,7 +259,7 @@ def reap_resource(workdir: Path, resource_id: str) -> ManifestResource:
 
 
 def enforce_destroy_gate(workdir: Path) -> None:
-    """Refuse to let *workdir* be destroyed while manifest resources are unreaped.
+    """Refuse to let *workdir* be destroyed while manifest resources are active.
 
     Called by ``workspace.run_workspace`` before ANY ``rmtree`` of a
     workspace (both ``-d`` and ``-f``).  Behavior:
@@ -258,10 +269,11 @@ def enforce_destroy_gate(workdir: Path) -> None:
     - Manifest present but unparseable (bad JSON, wrong shape, or a
       non-object resource entry): warn loudly and require the same typed
       confirmation as active resources, since safety cannot be verified.
-    - Manifest present, parses fine, and every resource is "reaped" (or the
-      resources list is empty): no-op.
-    - Manifest present with any resource not marked "reaped": print the
-      unreaped resources as a table and require the operator to type
+    - Manifest present, parses fine, and every resource is terminal
+      (``"reaped"`` or ``"observed_absent"``), or the resources list is empty:
+      no-op.
+    - Manifest present with any active resource: print the active resources as
+      a table and require the operator to type
       "orphan" before proceeding.
 
     Aborts via ``sys.exit(1)`` (printing the standard remediation message)
@@ -294,7 +306,7 @@ def enforce_destroy_gate(workdir: Path) -> None:
         _confirm_orphan(workdir)
         return
 
-    active = [r for r in resources if r.status != "reaped"]
+    active = [r for r in resources if not is_terminal_status(r.status)]
     if not active:
         return
 
@@ -313,7 +325,10 @@ def _confirm_orphan(workdir: Path) -> None:
     except EOFError:
         answer = ""
     if answer.strip().lower() != _CONFIRM_WORD:
-        print("reap these first or mark them reaped in WORKSPACE-MANIFEST.json")
+        print(
+            "reap these first or accurately record their terminal status in "
+            "WORKSPACE-MANIFEST.json"
+        )
         sys.exit(1)
 
 
@@ -353,19 +368,21 @@ def format_manifest_listing(workdir: Path) -> str:
     if not resources:
         return f"{MANIFEST_FILENAME}: 0 resources tracked."
 
-    active = [r for r in resources if r.status != "reaped"]
+    active = [r for r in resources if not is_terminal_status(r.status)]
+    observed_absent = [r for r in resources if r.status == "observed_absent"]
     reaped = [r for r in resources if r.status == "reaped"]
 
     lines = [
         (
             f"{MANIFEST_FILENAME}: {len(resources)} resource(s) -- "
-            f"{len(active)} active, {len(reaped)} reaped"
+            f"{len(active)} active, {len(observed_absent)} observed absent, "
+            f"{len(reaped)} reaped"
         ),
         "",
-        f"  {'STATUS':<10}{'KIND':<14}{'ID':<26}{'NOTE':<24}TEARDOWN",
+        f"  {'STATUS':<17}{'KIND':<14}{'ID':<26}{'NOTE':<24}TEARDOWN",
     ]
-    for r in active + reaped:  # active first
+    for r in active + observed_absent + reaped:
         lines.append(
-            f"  {r.status:<10}{r.kind:<14}{r.id:<26}{(r.note or ''):<24}{r.teardown or ''}"
+            f"  {r.status:<17}{r.kind:<14}{r.id:<26}{(r.note or ''):<24}{r.teardown or ''}"
         )
     return "\n".join(lines)

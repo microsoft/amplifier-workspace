@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 from amplifier_workspace.manifest import (
     MANIFEST_FILENAME,
+    VALID_STATUSES,
     ManifestError,
     ManifestResource,
     add_resource,
     create_workspace_manifest,
     enforce_destroy_gate,
     format_manifest_listing,
+    iter_resources,
     load_manifest,
     manifest_path,
     reap_resource,
@@ -110,6 +112,21 @@ class TestManifestResourceFromDict:
         r = ManifestResource.from_dict({"kind": "dtu", "id": "a", "status": "reaped"})
         assert r.status == "reaped"
 
+    def test_observed_absent_is_a_valid_status(self):
+        """An independently absent external resource preserves its audit timestamp."""
+        r = ManifestResource.from_dict(
+            {
+                "kind": "gitea",
+                "id": "gitea-123",
+                "created_at": "2026-09-11T00:00:00Z",
+                "status": "observed_absent",
+                "observed_absent_at": "2026-09-11T01:00:00Z",
+            }
+        )
+        assert "observed_absent" in VALID_STATUSES
+        assert r.status == "observed_absent"
+        assert r.to_dict()["observed_absent_at"] == "2026-09-11T01:00:00Z"
+
 
 class TestAddResource:
     def test_creates_manifest_if_absent_then_adds(self, tmp_path: Path):
@@ -202,6 +219,79 @@ class TestEnforceDestroyGate:
         )
         enforce_destroy_gate(tmp_path)
         assert prompted["called"] is False
+
+    def test_observed_absent_resource_is_terminal_and_listed_accurately(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """External absence is preserved, reported, and does not prompt for destruction."""
+        _write_raw(
+            tmp_path,
+            {
+                "version": 1,
+                "resources": [
+                    {
+                        "kind": "gitea",
+                        "id": "gitea-123",
+                        "note": "external shared reference",
+                        "created_at": "2026-09-11T00:00:00Z",
+                        "teardown": "do not destroy from this workspace",
+                        "status": "observed_absent",
+                        "observed_absent_at": "2026-09-11T01:00:00Z",
+                    }
+                ],
+            },
+        )
+
+        data = load_manifest(tmp_path)
+        assert data is not None
+        assert data["resources"][0]["observed_absent_at"] == "2026-09-11T01:00:00Z"
+        resource = iter_resources(data)[0]
+        assert resource.status == "observed_absent"
+        assert resource.observed_absent_at == "2026-09-11T01:00:00Z"
+
+        prompted = {"called": False}
+        monkeypatch.setattr(
+            "builtins.input", lambda *_: prompted.update(called=True) or ""
+        )
+        enforce_destroy_gate(tmp_path)
+
+        assert prompted["called"] is False
+        listing = format_manifest_listing(tmp_path)
+        assert "0 active, 1 observed absent, 0 reaped" in listing
+        assert "observed_absent" in listing
+
+    def test_only_active_resources_gate_in_a_mixed_manifest(
+        self, tmp_path: Path, monkeypatch, capsys
+    ):
+        """Terminal external-absence entries are omitted from an active-resource gate."""
+        _write_raw(
+            tmp_path,
+            {
+                "version": 1,
+                "resources": [
+                    {
+                        "kind": "dtu",
+                        "id": "dtu-active",
+                        "created_at": "2026-09-11T00:00:00Z",
+                        "status": "active",
+                    },
+                    {
+                        "kind": "gitea",
+                        "id": "gitea-absent",
+                        "created_at": "2026-09-11T00:00:00Z",
+                        "status": "observed_absent",
+                    },
+                ],
+            },
+        )
+        monkeypatch.setattr("builtins.input", lambda *_: "orphan")
+
+        enforce_destroy_gate(tmp_path)
+
+        output = capsys.readouterr().out
+        assert "1 unreaped resource(s)" in output
+        assert "dtu-active" in output
+        assert "gitea-absent" not in output
 
     def test_aborts_when_active_resource_and_confirmation_declined(
         self, tmp_path: Path, monkeypatch
@@ -306,3 +396,28 @@ class TestFormatManifestListing:
 
         message = format_manifest_listing(tmp_path)
         assert message.index("sess-1") < message.index("dtu-1")
+
+    def test_orders_active_observed_absent_then_reaped(self, tmp_path: Path):
+        """Listing keeps terminal statuses distinct after active resources."""
+        _write_raw(
+            tmp_path,
+            {
+                "version": 1,
+                "resources": [
+                    {"kind": "dtu", "id": "reaped-resource", "status": "reaped"},
+                    {
+                        "kind": "gitea",
+                        "id": "observed-absent-resource",
+                        "status": "observed_absent",
+                    },
+                    {"kind": "tmux", "id": "active-resource", "status": "active"},
+                ],
+            },
+        )
+
+        message = format_manifest_listing(tmp_path)
+        assert (
+            message.index("active-resource")
+            < message.index("observed-absent-resource")
+            < message.index("reaped-resource")
+        )

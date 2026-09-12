@@ -116,7 +116,7 @@ The workspace root is a local-only git repo -- use it for task-lifetime commits 
 
 Workspaces are ephemeral and self-contained, but sessions working inside one often spin up resources that live *outside* the workspace directory -- a DTU, a tmux session, a Gitea repo, a work-tracker project, a cloud resource. `-d`/`-f` deletes the directory; it has no way to reach those.
 
-Each workspace tracks such resources in `WORKSPACE-MANIFEST.json` at its root. Agents are instructed (via `AGENTS.md`) to record a resource the moment they create it, and mark it `"reaped"` once torn down.
+Each workspace tracks such resources in `WORKSPACE-MANIFEST.json` at its root. Agents are instructed (via `AGENTS.md`) to record a resource the moment they create it, mark it `"reaped"` when this workspace tears it down, or `"observed_absent"` when an externally owned resource is independently confirmed absent.
 
 Before destroying a workspace, `amplifier-workspace` reads this manifest. If any resource is still `"active"` (or the manifest can't be parsed), destruction is refused until you type `orphan` to explicitly acknowledge it will be left running -- the tool never tears resources down itself, it just refuses to lose track of them silently.
 

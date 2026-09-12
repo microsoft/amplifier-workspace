@@ -632,6 +632,34 @@ class TestRunWorkspaceManifestGate:
         run_workspace(tmp_path, config, destroy=True)
         mock_rmtree.assert_called_once_with(tmp_path)
 
+    @patch("amplifier_workspace.workspace.shutil.rmtree")
+    @patch("amplifier_workspace.config.load_config")
+    @patch("amplifier_workspace.config_manager.CONFIG_PATH")
+    def test_destroy_proceeds_without_prompt_when_resource_observed_absent(
+        self, mock_config_path, mock_load_config, mock_rmtree, tmp_path: Path, monkeypatch
+    ):
+        """-d does not block on an externally absent resource."""
+        mock_config_path.exists.return_value = True
+        mock_load_config.return_value = WorkspaceConfig()
+        (tmp_path / "WORKSPACE-MANIFEST.json").write_text(
+            """{"version": 1, "resources": [{
+                "kind": "gitea",
+                "id": "gitea-123",
+                "created_at": "2026-09-11T00:00:00Z",
+                "status": "observed_absent",
+                "observed_absent_at": "2026-09-11T01:00:00Z"
+            }]}"""
+        )
+        prompted = {"called": False}
+        monkeypatch.setattr(
+            "builtins.input", lambda *_: prompted.update(called=True) or ""
+        )
+
+        run_workspace(tmp_path, WorkspaceConfig(), destroy=True)
+
+        mock_rmtree.assert_called_once_with(tmp_path)
+        assert prompted["called"] is False
+
     @patch("amplifier_workspace.workspace._launch_amplifier")
     @patch("amplifier_workspace.workspace.setup_workspace")
     @patch("amplifier_workspace.workspace.shutil.rmtree")
