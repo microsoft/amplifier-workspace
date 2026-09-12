@@ -267,7 +267,9 @@ def run_doctor(workdir: Path | None = None) -> int:
                 )
                 failures += 1
             else:
-                active = [r for r in resources if r.status != "reaped"]
+                active = [
+                    r for r in resources if not _manifest.is_terminal_status(r.status)
+                ]
                 if active:
                     print(
                         f"  {_WARN}  WORKSPACE-MANIFEST.json  "
@@ -279,10 +281,16 @@ def run_doctor(workdir: Path | None = None) -> int:
                         f"amplifier-workspace manifest {target}   (reap before destroy)"
                     )
                 else:
+                    observed_absent = [
+                        r for r in resources if r.status == "observed_absent"
+                    ]
+                    detail = f"{len(resources)} resource(s), 0 active"
+                    if observed_absent:
+                        detail += f", {len(observed_absent)} observed absent"
                     _print_check(
                         "WORKSPACE-MANIFEST.json",
                         True,
-                        f"{len(resources)} resource(s), 0 active",
+                        detail,
                     )
 
         # AGENTS.md template drift (workspace copy vs packaged template)

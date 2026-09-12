@@ -62,7 +62,7 @@ The moment you create one, record it in `WORKSPACE-MANIFEST.json` at the workspa
 {"version": 1, "resources": [{"kind": "dtu", "id": "dtu-a1b2c3d4", "note": "integration test env", "created_at": "2026-01-01T00:00:00Z", "teardown": "amplifier-digital-twin destroy dtu-a1b2c3d4", "status": "active"}]}
 ```
 
-When you tear a resource down, set its `status` to `"reaped"` and add a `reaped_at` timestamp — don't delete the entry. Before declaring work done, reconcile the manifest: any entry still `"active"` is unfinished business, and destroying this workspace will refuse to proceed silently past it.
+When this workspace tears a resource down, set its `status` to `"reaped"` and add a `reaped_at` timestamp — don't delete the entry. If an externally owned resource is independently confirmed absent, set its status to `"observed_absent"` and record `observed_absent_at`; this records absence without claiming this workspace tore it down. Both are terminal statuses. Before declaring work done, reconcile the manifest: any entry still `"active"` is unfinished business, and destroying this workspace will refuse to proceed silently past it.
 
 ## Working Memory
 

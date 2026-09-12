@@ -630,6 +630,27 @@ class TestDoctorWorkspaceChecks:
         assert "0 active" in captured.out
         assert exit_code == 0
 
+    def test_manifest_observed_absent_passes_without_a_destroy_gate(self, tmp_path, capsys):
+        """An externally absent resource is informational, not a doctor warning."""
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        (ws / "AGENTS.md").write_text("x\n")
+        (ws / "WORKSPACE-MANIFEST.json").write_text(
+            """{"version": 1, "resources": [{
+                "kind": "gitea",
+                "id": "gitea-123",
+                "created_at": "2026-09-11T00:00:00Z",
+                "status": "observed_absent",
+                "observed_absent_at": "2026-09-11T01:00:00Z"
+            }]}"""
+        )
+
+        exit_code, captured = _run_doctor_for_workspace(ws, capsys)
+
+        assert "0 active, 1 observed absent" in captured.out
+        assert "gate destroy" not in captured.out
+        assert exit_code == 0
+
     def test_corrupt_manifest_is_a_failure(self, tmp_path, capsys):
         """An unparseable manifest is a doctor failure (exit 1) with a remedy."""
         ws = tmp_path / "ws"
