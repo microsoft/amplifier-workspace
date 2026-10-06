@@ -493,7 +493,7 @@ class TestDefaultsAndDiff:
         from amplifier_workspace.config_manager import default_config_dict
 
         d = default_config_dict()
-        assert d["workspace"]["bundle"] == "amplifier-dev"
+        assert d["workspace"]["bundle"] == "anchors-amp-dev"
         assert d["tmux"]["enabled"] is False
         assert "amplifier" in d["tmux"]["windows"]
 
