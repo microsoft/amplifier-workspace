@@ -21,7 +21,7 @@ _DEFAULT_REPOS: list[str] = [
 
 # Public constants for use by wizard and other callers
 DEFAULT_REPOS: list[str] = list(_DEFAULT_REPOS)
-DEFAULT_BUNDLE: str = "amplifier-dev"
+DEFAULT_BUNDLE: str = "anchors-amp-dev"
 
 _DEFAULT_WINDOWS: dict[str, str] = {
     "amplifier": "",
@@ -41,7 +41,7 @@ class TmuxConfig:
 @dataclass
 class WorkspaceConfig:
     default_repos: list[str] = field(default_factory=lambda: list(_DEFAULT_REPOS))
-    bundle: str = "amplifier-dev"
+    bundle: str = DEFAULT_BUNDLE
     agents_template: str = ""
     tmux: TmuxConfig = field(default_factory=TmuxConfig)
 
@@ -94,7 +94,7 @@ def load_config(config_path: Path | None = None) -> WorkspaceConfig:
 
     return WorkspaceConfig(
         default_repos=workspace_section.get("default_repos", list(_DEFAULT_REPOS)),
-        bundle=workspace_section.get("bundle", "amplifier-dev"),
+        bundle=workspace_section.get("bundle", DEFAULT_BUNDLE),
         agents_template=agents_template,
         tmux=tmux_cfg,
     )

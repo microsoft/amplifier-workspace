@@ -34,7 +34,7 @@ Step 1 of 4: Default repos
 Keep these defaults? [Y/n]:
 
 Step 2 of 4: Amplifier bundle
-Amplifier bundle name [amplifier-dev]:
+Amplifier bundle name [anchors-amp-dev]:
 
 Step 3 of 4: AGENTS.md template
   [1] Built-in (default)
@@ -46,6 +46,10 @@ Enable tmux session manager? [y/N]:
 ```
 
 The wizard writes your config to `~/.config/amplifier-workspace/config.toml`. After that, every `amplifier-workspace` invocation just works.
+
+The shipped default bundle is `anchors-amp-dev`. Upgrading does not change an
+explicitly saved bundle selection (including `amplifier-dev` or a custom bundle),
+and existing workspace `.amplifier/settings.yaml` files are left unchanged.
 
 ## Usage
 

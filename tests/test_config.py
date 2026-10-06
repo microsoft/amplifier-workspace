@@ -1,14 +1,32 @@
 """Tests for config.py dataclasses: WorkspaceConfig and TmuxConfig defaults."""
 
+import importlib.resources
+import tomllib
 from pathlib import Path
 
-from amplifier_workspace.config import TmuxConfig, WorkspaceConfig, load_config
+import pytest
+
+from amplifier_workspace.config import (
+    DEFAULT_BUNDLE,
+    TmuxConfig,
+    WorkspaceConfig,
+    load_config,
+)
 
 
 class TestWorkspaceConfigDefaults:
-    def test_bundle_defaults_to_amplifier_dev(self):
+    def test_bundle_defaults_to_anchors_amp_dev(self):
         cfg = WorkspaceConfig()
-        assert cfg.bundle == "amplifier-dev"
+        assert cfg.bundle == "anchors-amp-dev"
+
+    def test_bundled_template_matches_default_bundle(self):
+        template = (
+            importlib.resources.files("amplifier_workspace")
+            / "templates"
+            / "default-config.toml"
+        )
+        data = tomllib.loads(template.read_text(encoding="utf-8"))
+        assert data["workspace"]["bundle"] == DEFAULT_BUNDLE == "anchors-amp-dev"
 
     def test_agents_template_defaults_to_empty_string(self):
         cfg = WorkspaceConfig()
@@ -50,16 +68,27 @@ class TestTmuxConfig:
 class TestLoadConfig:
     def test_returns_defaults_when_file_missing(self, tmp_path: Path):
         cfg = load_config(tmp_path / "nonexistent.toml")
-        assert cfg.bundle == "amplifier-dev"
+        assert cfg.bundle == "anchors-amp-dev"
         assert len(cfg.default_repos) == 3
         assert cfg.tmux.enabled is False
 
-    def test_merges_bundle_from_file(self, tmp_path: Path):
+    @pytest.mark.parametrize("content", ["", '[workspace]\nagents_template = ""\n'])
+    def test_defaults_when_bundle_key_missing(self, tmp_path: Path, content: str):
         config_file = tmp_path / "config.toml"
-        config_file.write_text('[workspace]\nbundle = "my-custom-bundle"\n')
+        config_file.write_text(content)
+        assert load_config(config_file).bundle == "anchors-amp-dev"
+
+    @pytest.mark.parametrize("bundle", ["amplifier-dev", "my-custom-bundle"])
+    def test_preserves_explicit_bundle_and_file_bytes(self, tmp_path: Path, bundle: str):
+        config_file = tmp_path / "config.toml"
+        original = (
+            f'# Saved selection\r\n[workspace]\r\nbundle = "{bundle}"  # keep\r\n'
+        ).encode()
+        config_file.write_bytes(original)
         cfg = load_config(config_file)
-        assert cfg.bundle == "my-custom-bundle"
+        assert cfg.bundle == bundle
         assert len(cfg.default_repos) == 3
+        assert config_file.read_bytes() == original
 
     def test_merges_repos_from_file(self, tmp_path: Path):
         config_file = tmp_path / "config.toml"

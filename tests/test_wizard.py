@@ -4,8 +4,19 @@ from unittest.mock import patch
 
 import pytest
 
-from amplifier_workspace.config import DEFAULT_BUNDLE, DEFAULT_REPOS
+from amplifier_workspace.config import DEFAULT_BUNDLE, DEFAULT_REPOS, load_config
 from amplifier_workspace.wizard import _prompt, _step4_session_manager, run_wizard
+
+
+@pytest.fixture(autouse=True)
+def isolated_config_path(monkeypatch, tmp_path):
+    """Keep wizard directory creation and config writes inside the temp fixture."""
+    from amplifier_workspace import config_manager, wizard
+
+    config_path = tmp_path / "config" / "config.toml"
+    monkeypatch.setattr(wizard, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(config_manager, "CONFIG_PATH", config_path)
+    return config_path
 
 
 class TestPrompt:
@@ -29,6 +40,18 @@ class TestPrompt:
 
 
 class TestRunWizard:
+    def test_blank_bundle_prompt_shows_and_writes_anchors_amp_dev(
+        self, isolated_config_path
+    ):
+        with patch("builtins.input", side_effect=iter(["", "", "", ""])) as mock_input:
+            run_wizard()
+
+        assert mock_input.call_args_list[1].args == (
+            "Amplifier bundle name [anchors-amp-dev]: ",
+        )
+        assert 'bundle = "anchors-amp-dev"' in isolated_config_path.read_text()
+        assert load_config(isolated_config_path).bundle == "anchors-amp-dev"
+
     def test_accepts_default_repos_on_y(self):
         """Answering Y keeps DEFAULT_REPOS and DEFAULT_BUNDLE in the written config."""
         # inputs: "Y" → keep repos, "" → accept default bundle, "" → default template choice,

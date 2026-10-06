@@ -637,7 +637,7 @@ class TestConfigReset:
         # Defaults written (bundle back to default).
         from amplifier_workspace import config_manager as cm
 
-        assert cm.get_nested_setting("workspace.bundle") == "amplifier-dev"
+        assert cm.get_nested_setting("workspace.bundle") == "anchors-amp-dev"
 
     def test_reset_cancelled_leaves_config_untouched(
         self, capsys, monkeypatch, tmp_path

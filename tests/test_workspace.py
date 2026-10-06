@@ -62,6 +62,11 @@ class TestCreateAgentsMd:
 
 
 class TestCreateAmplifierSettings:
+    def test_default_settings_yaml_is_exact(self, tmp_path: Path):
+        create_amplifier_settings(tmp_path, WorkspaceConfig())
+        settings = tmp_path / ".amplifier" / "settings.yaml"
+        assert settings.read_text(encoding="utf-8") == "bundle:\n  active: anchors-amp-dev\n"
+
     def test_creates_amplifier_settings_yaml(self, tmp_path: Path):
         """Creates .amplifier/settings.yaml in the workspace directory."""
         config = WorkspaceConfig(bundle="my-bundle")
@@ -69,12 +74,13 @@ class TestCreateAmplifierSettings:
         settings = tmp_path / ".amplifier" / "settings.yaml"
         assert settings.exists()
 
-    def test_settings_contains_bundle_name(self, tmp_path: Path):
-        """settings.yaml includes the configured bundle name."""
-        config = WorkspaceConfig(bundle="my-bundle")
+    @pytest.mark.parametrize("bundle", ["amplifier-dev", "my-bundle"])
+    def test_settings_uses_explicit_bundle_name(self, tmp_path: Path, bundle: str):
+        """settings.yaml uses the configured legacy or custom bundle name."""
+        config = WorkspaceConfig(bundle=bundle)
         create_amplifier_settings(tmp_path, config)
-        content = (tmp_path / ".amplifier" / "settings.yaml").read_text()
-        assert "my-bundle" in content
+        settings = tmp_path / ".amplifier" / "settings.yaml"
+        assert settings.read_text(encoding="utf-8") == f"bundle:\n  active: {bundle}\n"
 
     def test_creates_amplifier_directory(self, tmp_path: Path):
         """Creates .amplifier/ directory if it does not exist."""
@@ -82,15 +88,20 @@ class TestCreateAmplifierSettings:
         create_amplifier_settings(tmp_path, config)
         assert (tmp_path / ".amplifier").is_dir()
 
-    def test_skips_if_settings_already_exists(self, tmp_path: Path):
+    @pytest.mark.parametrize("bundle", ["amplifier-dev", "my-custom-bundle"])
+    def test_skips_if_settings_already_exists(self, tmp_path: Path, bundle: str):
         """Does not overwrite existing .amplifier/settings.yaml."""
         amplifier_dir = tmp_path / ".amplifier"
         amplifier_dir.mkdir()
         settings = amplifier_dir / "settings.yaml"
-        settings.write_text("bundle:\n  active: original-bundle\n")
-        config = WorkspaceConfig(bundle="new-bundle")
+        original = (
+            f"# Saved selection\r\nbundle:\r\n  active: {bundle}\r\n"
+            "custom: keep-me\r\n"
+        ).encode()
+        settings.write_bytes(original)
+        config = WorkspaceConfig()
         create_amplifier_settings(tmp_path, config)
-        assert "original-bundle" in settings.read_text()
+        assert settings.read_bytes() == original
 
 
 class TestSetupWorkspace:
