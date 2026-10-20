@@ -191,6 +191,16 @@ def test_cli_update_defaults_to_cwd(monkeypatch, tmp_path):
 # manifest subcommand
 # ---------------------------------------------------------------------------
 
+def test_cli_manifest_help_defines_cleanup_scope(capsys):
+    """CLI users get the same lifetime boundary and truthful reap semantics."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["manifest", "--help"])
+    assert exc_info.value.code == 0
+    output = " ".join(capsys.readouterr().out.split())
+    assert "temporary resources that need cleanup before workspace destruction" in output
+    assert "not durable deliverables or shared infrastructure" in output
+    assert "after actual teardown" in output
+
 
 def test_cli_manifest_lists_absent_manifest(tmp_path, capsys):
     """'manifest <workdir>' with no WORKSPACE-MANIFEST.json prints a friendly message

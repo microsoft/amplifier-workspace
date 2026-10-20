@@ -60,6 +60,26 @@ class TestCreateAgentsMd:
         content = (tmp_path / "AGENTS.md").read_text()
         assert "amplifier" in content.lower()
 
+    def test_builtin_template_limits_manifest_to_workspace_cleanup(self, tmp_path: Path):
+        """The installed scaffold must not turn task deliverables into cleanup debt."""
+        create_agents_md(tmp_path, WorkspaceConfig())
+        content = (tmp_path / "AGENTS.md").read_text()
+        guidance = content.split("## Tracking External Resources\n", 1)[1].split("\n## ", 1)[0]
+        assert "cleanup ledger, not an inventory" in guidance
+        assert "intended lifetime, not resource type" in guidance
+        assert "Do not add durable deliverables" in guidance
+        assert "shared Foundry account" in guidance
+        assert "If the intended lifetime is unclear, clarify it" in guidance
+        assert "The moment you create one, record it" not in guidance
+
+    def test_builtin_template_explains_misclassification_recovery(self, tmp_path: Path):
+        """A live durable resource is removed from scope, not falsely marked absent."""
+        create_agents_md(tmp_path, WorkspaceConfig())
+        content = (tmp_path / "AGENTS.md").read_text()
+        assert "remove only that mistaken entry" in content
+        assert "Do not mark a live resource" in content
+        assert "Preserve genuine cleanup entries and their history" in content
+
 
 class TestCreateAmplifierSettings:
     def test_default_settings_yaml_is_exact(self, tmp_path: Path):
@@ -609,6 +629,49 @@ class TestSetupWorkspaceCreatesManifest:
 
 class TestRunWorkspaceManifestGate:
     """Destroy/fresh must gate on active WORKSPACE-MANIFEST.json resources (-d AND -f)."""
+
+    @pytest.mark.parametrize("fresh", [False, True], ids=["destroy", "fresh"])
+    def test_correcting_durable_entry_preserves_temporary_cleanup_gate(
+        self, tmp_path: Path, monkeypatch, fresh
+    ):
+        """Scope correction is not permission to drop real cleanup liabilities."""
+        import json
+
+        _manifest_mod.add_resource(
+            tmp_path, "cloud", "shared-model", note="durable task deliverable"
+        )
+        _manifest_mod.add_resource(
+            tmp_path, "cloud", "scratch-model", note="temporary integration test"
+        )
+        data = _manifest_mod.load_manifest(tmp_path)
+        temporary = data["resources"][1].copy()
+        # Follow the shipped recovery instructions: remove only the mistaken entry.
+        data["resources"] = [r for r in data["resources"] if r["id"] != "shared-model"]
+        _manifest_mod.manifest_path(tmp_path).write_text(json.dumps(data))
+        monkeypatch.setattr("builtins.input", lambda *_: "")
+
+        with (
+            patch("amplifier_workspace.config_manager.CONFIG_PATH") as config_path,
+            patch("amplifier_workspace.config.load_config", return_value=WorkspaceConfig()),
+            patch("amplifier_workspace.workspace.shutil.rmtree") as rmtree,
+            patch("amplifier_workspace.workspace.setup_workspace") as setup,
+            patch("amplifier_workspace.workspace._launch_amplifier") as launch,
+        ):
+            config_path.exists.return_value = True
+            flags = {"fresh": True} if fresh else {"destroy": True}
+            with pytest.raises(SystemExit):
+                run_workspace(tmp_path, WorkspaceConfig(), **flags)
+            rmtree.assert_not_called()
+            setup.assert_not_called()
+            launch.assert_not_called()
+            assert _manifest_mod.load_manifest(tmp_path)["resources"] == [temporary]
+
+            _manifest_mod.reap_resource(tmp_path, "scratch-model")
+            with patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+                run_workspace(tmp_path, WorkspaceConfig(), **flags)
+            rmtree.assert_called_once_with(tmp_path)
+            assert setup.call_count == int(fresh)
+            assert launch.call_count == int(fresh)
 
     @patch("amplifier_workspace.workspace.shutil.rmtree")
     @patch("amplifier_workspace.config.load_config")

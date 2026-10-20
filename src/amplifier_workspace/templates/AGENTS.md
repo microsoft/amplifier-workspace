@@ -54,15 +54,21 @@ Don't store anything that needs **long-term persistance** in the root directory.
 
 ## Tracking External Resources
 
-Some work here spins up resources that live **outside** this directory and will NOT be cleaned up when the workspace is destroyed — a DTU/container, a tmux session, a Gitea instance or repo, a work-tracker project, a cloud resource. Destroying the workspace only removes this directory; it cannot see any of these.
+`WORKSPACE-MANIFEST.json` is a **cleanup ledger, not an inventory** of everything created during a task. Record only temporary resources whose cleanup belongs to this workspace and that deleting its directory will not remove. The test is **intended lifetime, not resource type or location**.
 
-The moment you create one, record it in `WORKSPACE-MANIFEST.json` at the workspace root (create the file if absent):
+- **Track:** temporary DTUs/containers, extra test tmux sessions, scratch Gitea instances/repos, temporary cloud test resources, and task-only files or caches outside the workspace. Record them when created so they are not abandoned running or consuming disk.
+- **Do not add durable deliverables** intended to survive the workspace, such as a shared Foundry account, a deployed application, or long-lived project infrastructure. Do not add pre-existing shared services merely because this task uses them. Keep their operational details in the owning project's durable records, not this disposable ledger.
+- If the intended lifetime is unclear, clarify it before treating a resource as disposable. Creating something from an ephemeral workspace does not make it temporary.
+
+Add each cleanup liability at the workspace root (create the file if absent); an empty `resources` list is correct when nothing needs cleanup:
 
 ```json
 {"version": 1, "resources": [{"kind": "dtu", "id": "dtu-a1b2c3d4", "note": "integration test env", "created_at": "2026-01-01T00:00:00Z", "teardown": "amplifier-digital-twin destroy dtu-a1b2c3d4", "status": "active"}]}
 ```
 
-When this workspace tears a resource down, set its `status` to `"reaped"` and add a `reaped_at` timestamp — don't delete the entry. If an externally owned resource is independently confirmed absent, set its status to `"observed_absent"` and record `observed_absent_at`; this records absence without claiming this workspace tore it down. Both are terminal statuses. Before declaring work done, reconcile the manifest: any entry still `"active"` is unfinished business, and destroying this workspace will refuse to proceed silently past it.
+When this workspace actually tears a tracked resource down, set its `status` to `"reaped"` and add a `reaped_at` timestamp. If it is independently confirmed absent without this workspace tearing it down, use `"observed_absent"` and `observed_absent_at`. Preserve genuine cleanup entries and their history. Before declaring work done, reconcile these entries: any still `"active"` is unfinished cleanup, and destruction requires explicit acknowledgment before leaving it behind. The workspace tool never executes teardown hints itself.
+
+**Correcting a scope mistake:** if a durable resource was added by mistake, verify it is intended to survive, preserve any needed details in the owning project's durable records, and remove only that mistaken entry. Do not mark a live resource `"reaped"` or `"observed_absent"`, invent a retention status, or delete the manifest to bypass other cleanup obligations.
 
 ## Working Memory
 

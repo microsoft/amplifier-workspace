@@ -190,6 +190,22 @@ class TestReapResource:
 
 
 class TestEnforceDestroyGate:
+    def test_notes_cannot_exempt_an_active_entry(self, tmp_path: Path, monkeypatch):
+        """Free-text intent cannot silently bypass the cleanup gate."""
+        add_resource(tmp_path, "cloud", "cloud-1", note="Persistent: do not delete")
+        monkeypatch.setattr("builtins.input", lambda *_: "")
+        with pytest.raises(SystemExit):
+            enforce_destroy_gate(tmp_path)
+        assert load_manifest(tmp_path)["resources"][0]["status"] == "active"
+
+    def test_decline_explains_scope_correction(self, tmp_path: Path, monkeypatch, capsys):
+        """The remedy must distinguish misclassification from actual teardown."""
+        add_resource(tmp_path, "cloud", "cloud-1")
+        monkeypatch.setattr("builtins.input", lambda *_: "")
+        with pytest.raises(SystemExit):
+            enforce_destroy_gate(tmp_path)
+        assert "remove only that mistaken entry" in capsys.readouterr().out
+
     def test_noop_when_manifest_absent(self, tmp_path: Path, monkeypatch):
         """Returns immediately (no prompt) when no manifest file exists."""
         prompted = {"called": False}

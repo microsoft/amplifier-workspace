@@ -118,17 +118,27 @@ The workspace root is a local-only git repo -- use it for task-lifetime commits 
 
 ## Workspace Manifest
 
-Workspaces are ephemeral and self-contained, but sessions working inside one often spin up resources that live *outside* the workspace directory -- a DTU, a tmux session, a Gitea repo, a work-tracker project, a cloud resource. `-d`/`-f` deletes the directory; it has no way to reach those.
+`WORKSPACE-MANIFEST.json` is a **cleanup ledger, not a resource inventory**. It tracks temporary resources whose cleanup belongs to this workspace but that `-d`/`-f` cannot remove by deleting the directory: test DTUs/containers, extra tmux sessions, scratch Gitea instances/repos, temporary cloud test resources, and task-only files or caches outside the workspace.
 
-Each workspace tracks such resources in `WORKSPACE-MANIFEST.json` at its root. Agents are instructed (via `AGENTS.md`) to record a resource the moment they create it, mark it `"reaped"` when this workspace tears it down, or `"observed_absent"` when an externally owned resource is independently confirmed absent.
+Scope follows **intended lifetime**, not resource type or location. Durable task deliverables -- a shared Foundry account, a deployed application, or long-lived project infrastructure -- belong to their project, not this disposable ledger. Pre-existing shared services do not belong here merely because a workspace uses them. Their creation or use must not become a teardown obligation. Clarify unclear lifetime before treating a resource as disposable.
+
+Agents are instructed (via `AGENTS.md`) to record each cleanup liability when created, mark it `"reaped"` only after this workspace actually tears it down, or `"observed_absent"` when independently confirmed absent. Keep this cleanup history. An empty `resources` list is correct when nothing needs cleanup.
 
 Before destroying a workspace, `amplifier-workspace` reads this manifest. If any resource is still `"active"` (or the manifest can't be parsed), destruction is refused until you type `orphan` to explicitly acknowledge it will be left running -- the tool never tears resources down itself, it just refuses to lose track of them silently.
 
 ```bash
-amplifier-workspace manifest ~/dev/fix-auth               # list tracked resources
+amplifier-workspace manifest ~/dev/fix-auth               # list cleanup resources
 amplifier-workspace manifest ~/dev/fix-auth --add dtu dtu-a1b2c3d4 --note "integration test"
-amplifier-workspace manifest ~/dev/fix-auth --reap dtu-a1b2c3d4
+amplifier-workspace manifest ~/dev/fix-auth --reap dtu-a1b2c3d4  # record actual teardown
 ```
+
+### Existing workspaces with the old guidance
+
+Upgrading the CLI changes its packaged template and help, but does **not** overwrite an existing workspace's `AGENTS.md`, a configured custom template, or its manifest. `update` refreshes submodules only.
+
+After upgrading, run `amplifier-workspace doctor ~/dev/fix-auth` and reconcile the **Tracking External Resources** section with the cleanup-only scope above, preserving local edits. Update a configured custom template too.
+
+If a durable resource was mistakenly recorded, verify it is intended to survive, preserve its needed operational details in the owning project's durable records, and remove **only that misclassified entry** from `resources`. Leave real cleanup liabilities and their history intact. Do not mark a live resource `"reaped"` or `"observed_absent"`, invent a retention status, or delete the whole manifest to bypass the gate. The tool cannot infer intent from a resource's type or free-text notes and does not automatically reclassify entries.
 
 ## Two Tiers
 

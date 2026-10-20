@@ -1,26 +1,26 @@
-"""Workspace resource manifest: an honesty ledger for externally spun-up resources.
+"""Workspace cleanup ledger for temporary resources the directory cannot contain.
 
 Workspaces created by ``amplifier-workspace`` are ephemeral and self-contained --
-``-d``/``-f`` simply ``rmtree``s the directory.  But sessions working *inside* a
-workspace routinely spin up resources that live entirely outside it: a DTU or
-container, a tmux session, a Gitea instance or repo, a work-tracker project, a
-cloud resource.  ``rmtree`` cannot see any of these, so they get silently
-orphaned when the workspace is destroyed.
+``-d``/``-f`` simply ``rmtree``s the directory. Temporary DTUs/containers,
+extra test tmux sessions, scratch Gitea resources, temporary cloud resources,
+and task-only external files/caches need separate cleanup.
 
-``WORKSPACE-MANIFEST.json`` (at the workspace root) is a per-workspace ledger
-of such resources.  Agents working in the workspace are expected to record a
-resource the moment they create it (see ``templates/AGENTS.md``) and mark it
-``"reaped"`` once this workspace tears it down.  An externally owned resource
-independently confirmed absent is instead ``"observed_absent"``. Before any
+``WORKSPACE-MANIFEST.json`` tracks only cleanup liabilities belonging to the
+workspace, not durable deliverables or pre-existing shared infrastructure.
+Intended lifetime determines scope, not resource type or location. Agents
+record each liability when created (see ``templates/AGENTS.md``) and mark it
+``"reaped"`` only after actual teardown by this workspace. Independent
+confirmation of absence is instead ``"observed_absent"``. Before any
 destroy (``-d`` or ``-f``), this module gates the ``rmtree``: if any entry is
 still active -- or the manifest cannot be parsed at all -- destruction is
 refused until the operator explicitly acknowledges the orphaning by typing
 "orphan".
 
 This module is pure bookkeeping and a gate.  It never tears a resource down
-itself -- mechanism, not policy.  The manifest is tossed along with the rest
-of the workspace on a confirmed destroy; its job is only to make destruction
-honest.
+itself or guesses lifetime from kinds/notes. Correct a mistakenly included
+durable resource by removing only that entry after verifying its intended
+lifetime, not by falsifying a terminal status. Preserve real cleanup history.
+The ledger is discarded with the workspace on a confirmed destroy.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class ManifestError(Exception):
 
 @dataclass
 class ManifestResource:
-    """A single externally-managed resource tracked by the manifest."""
+    """A temporary resource whose separate cleanup belongs to this workspace."""
 
     kind: str
     id: str
@@ -207,10 +207,11 @@ def add_resource(
     note: str | None = None,
     teardown: str | None = None,
 ) -> ManifestResource:
-    """Append a new active resource entry to the workspace manifest.
+    """Append an active workspace cleanup liability, not a durable deliverable.
 
     Creates WORKSPACE-MANIFEST.json first if it does not yet exist.  Raises
-    ManifestError if an existing manifest cannot be parsed.
+    ManifestError if an existing manifest cannot be parsed. The caller determines
+    intended lifetime; this helper does not infer it from kind or note.
     """
     create_workspace_manifest(workdir)
     data = load_manifest(workdir)
@@ -230,8 +231,9 @@ def add_resource(
 
 
 def reap_resource(workdir: Path, resource_id: str) -> ManifestResource:
-    """Mark the first resource matching *resource_id* as reaped.
+    """Record actual teardown of the first resource matching *resource_id*.
 
+    Bookkeeping only: the caller must have torn the resource down first.
     Raises ManifestError if the manifest is absent or cannot be parsed, or
     ValueError if no resource with that id exists.
     """
@@ -286,7 +288,7 @@ def enforce_destroy_gate(workdir: Path) -> None:
         print(f"warning: {exc}")
         print(
             f"{MANIFEST_FILENAME} exists but could not be read, so it is not "
-            "possible to confirm there are no outstanding external resources."
+            "possible to confirm there are no outstanding workspace cleanup resources."
         )
         _confirm_orphan(workdir)
         return
@@ -300,8 +302,8 @@ def enforce_destroy_gate(workdir: Path) -> None:
         print(f"warning: {exc}")
         print(
             f"{MANIFEST_FILENAME} exists but its entries could not be parsed, so "
-            "it is not possible to confirm there are no outstanding external "
-            "resources."
+            "it is not possible to confirm there are no outstanding workspace "
+            "cleanup resources."
         )
         _confirm_orphan(workdir)
         return
@@ -328,6 +330,11 @@ def _confirm_orphan(workdir: Path) -> None:
         print(
             "reap these first or accurately record their terminal status in "
             "WORKSPACE-MANIFEST.json"
+        )
+        print(
+            "If a durable deliverable was included by mistake, verify its intended "
+            "lifetime and remove only that mistaken entry; preserve real cleanup "
+            "entries and never mark a live resource reaped or observed_absent."
         )
         sys.exit(1)
 

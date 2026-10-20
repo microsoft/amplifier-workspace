@@ -253,8 +253,8 @@ def run_doctor(workdir: Path | None = None) -> int:
         if not mpath.exists():
             print(f"  {_WARN}  WORKSPACE-MANIFEST.json  not found")
             _print_remedy(
-                f"amplifier-workspace manifest {target} --add <kind> <id>"
-                "   (or re-run setup)"
+                'create WORKSPACE-MANIFEST.json with {"version": 1, "resources": []}; '
+                "leave resources empty when nothing needs cleanup"
             )
         else:
             try:
@@ -263,7 +263,8 @@ def run_doctor(workdir: Path | None = None) -> int:
             except _manifest.ManifestError as exc:
                 _print_check("WORKSPACE-MANIFEST.json", False, f"unparseable: {exc}")
                 _print_remedy(
-                    "fix or delete WORKSPACE-MANIFEST.json (it gates destroy)"
+                    "repair WORKSPACE-MANIFEST.json; preserve cleanup entries "
+                    "(it gates destroy)"
                 )
                 failures += 1
             else:
@@ -278,7 +279,9 @@ def run_doctor(workdir: Path | None = None) -> int:
                     for r in active:
                         print(f"         - {r.kind}  {r.id}")
                     _print_remedy(
-                        f"amplifier-workspace manifest {target}   (reap before destroy)"
+                        f"amplifier-workspace manifest {target}   "
+                        "(review workspace cleanup; remove only misclassified durable "
+                        "entries, otherwise clean up and record actual teardown/absence)"
                     )
                 else:
                     observed_absent = [
@@ -315,7 +318,8 @@ def run_doctor(workdir: Path | None = None) -> int:
                     "(older scaffold or local edits)"
                 )
                 _print_remedy(
-                    "diff against the packaged template; intentional edits are fine"
+                    "diff against the packaged template; review Tracking External "
+                    "Resources cleanup scope; preserve intentional local edits"
                 )
             else:
                 _print_check("AGENTS.md template", True, "matches packaged")
