@@ -599,6 +599,8 @@ class TestDoctorWorkspaceChecks:
         exit_code, captured = _run_doctor_for_workspace(ws, capsys)
         assert "WORKSPACE-MANIFEST.json" in captured.out
         assert "not found" in captured.out
+        assert "--add <kind> <id>" not in captured.out
+        assert "leave resources empty when nothing needs cleanup" in captured.out
         assert exit_code == 0  # a missing manifest is a warning, not a failure
 
     def test_manifest_active_resources_listed(self, tmp_path, capsys):
@@ -614,6 +616,8 @@ class TestDoctorWorkspaceChecks:
         assert "1 active" in captured.out
         assert "dtu-123" in captured.out
         assert "gate destroy" in captured.out
+        assert "workspace cleanup" in captured.out
+        assert "remove only misclassified durable entries" in captured.out
         assert exit_code == 0
 
     def test_manifest_all_reaped_passes(self, tmp_path, capsys):
@@ -660,6 +664,8 @@ class TestDoctorWorkspaceChecks:
 
         exit_code, captured = _run_doctor_for_workspace(ws, capsys)
         assert "unparseable" in captured.out.lower()
+        assert "preserve cleanup entries" in captured.out
+        assert "fix or delete" not in captured.out
         assert exit_code == 1
 
     def test_template_drift_warns(self, tmp_path, capsys):

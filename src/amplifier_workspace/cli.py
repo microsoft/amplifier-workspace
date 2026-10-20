@@ -18,7 +18,7 @@ _SUBCOMMAND_SUMMARIES: tuple[tuple[str, str], ...] = (
     ("upgrade", "Self-update the amplifier-workspace CLI tool."),
     ("update", "Update a workspace's submodules (not the CLI tool)."),
     ("config", "Manage configuration (list/get/set/add/remove/reset)."),
-    ("manifest", "List or edit the workspace resource manifest."),
+    ("manifest", "List or edit the workspace cleanup manifest."),
     ("list", "List workspaces."),
     ("help", "Show this help."),
 )
@@ -302,7 +302,7 @@ def _cmd_manifest(
     teardown: str | None,
     reap: str | None,
 ) -> None:
-    """List the workspace resource manifest, or add/reap an entry.
+    """List the workspace cleanup manifest, or add/reap an entry.
 
     With no flags, prints a listing (active resources first) and always
     succeeds -- listing never raises.  ``--add``/``--reap`` are for
@@ -493,7 +493,11 @@ def main(argv: list[str] | None = None) -> None:
             # manifest — list, or (optionally) add/reap a resource entry
             manifest_p = subparsers.add_parser(
                 "manifest",
-                help="List (or edit) the workspace resource manifest.",
+                help="List (or edit) the workspace cleanup manifest.",
+                description=(
+                    "Track temporary resources that need cleanup before workspace "
+                    "destruction, not durable deliverables or shared infrastructure."
+                ),
             )
             manifest_p.add_argument(
                 "workdir",
@@ -510,7 +514,7 @@ def main(argv: list[str] | None = None) -> None:
                 nargs=2,
                 metavar=("KIND", "ID"),
                 default=None,
-                help="Add a resource entry: --add <kind> <id>.",
+                help="Add a temporary workspace cleanup liability: --add <kind> <id>.",
             )
             manifest_p.add_argument(
                 "--note",
@@ -526,7 +530,7 @@ def main(argv: list[str] | None = None) -> None:
                 "--reap",
                 metavar="ID",
                 default=None,
-                help="Mark the resource with this id as reaped.",
+                help="Record the resource with this id as reaped after actual teardown.",
             )
 
             args = sub_parser.parse_args(effective_argv)
