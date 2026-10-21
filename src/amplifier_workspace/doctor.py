@@ -318,8 +318,9 @@ def run_doctor(workdir: Path | None = None) -> int:
                     "(older scaffold or local edits)"
                 )
                 _print_remedy(
-                    "diff against the packaged template; review Tracking External "
-                    "Resources cleanup scope; preserve intentional local edits"
+                    "compare all guidance with the packaged template, including "
+                    "Verification and Missing Tools and Tracking External Resources; "
+                    "preserve intentional local edits; no automatic rewrite"
                 )
             else:
                 _print_check("AGENTS.md template", True, "matches packaged")

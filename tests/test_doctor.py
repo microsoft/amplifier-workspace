@@ -673,6 +673,11 @@ class TestDoctorWorkspaceChecks:
         ws = _make_older_workspace(tmp_path)  # AGENTS.md = "# local edits\n"
         exit_code, captured = _run_doctor_for_workspace(ws, capsys)
         assert "AGENTS.md differs from the packaged template" in captured.out
+        assert "compare all guidance with the packaged template" in captured.out
+        assert "Verification and Missing Tools" in captured.out
+        assert "Tracking External Resources" in captured.out
+        assert "preserve intentional local edits; no automatic rewrite" in captured.out
+        assert (ws / "AGENTS.md").read_text() == "# local edits\n"
         assert exit_code == 0
 
     def test_template_match_passes(self, tmp_path, capsys):
@@ -700,6 +705,8 @@ class TestDoctorWorkspaceChecks:
             ws, capsys, agents_template=str(custom)
         )
         assert "differs from the packaged template" not in captured.out
+        assert custom.read_text() == "# custom\n"
+        assert (ws / "AGENTS.md").read_text() == "# local edits\n"
         assert exit_code == 0
 
     def test_non_workspace_dir_has_no_workspace_section(self, tmp_path, capsys):

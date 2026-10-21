@@ -44,6 +44,14 @@ When you start work in a subdir — and again when the work shifts phase (design
 
 Don't reconstruct that guidance from memory. Load the `per-repo-conventions` skill, or read `foundation:docs/PER_REPO_CONVENTIONS.md`, for the full discovery pattern, re-read cadence, verification gradient, and lesson-capture routing.
 
+## Verification and Missing Tools
+
+1. **Match the requested evidence.** Static inspection and unit tests support verification; they do not replace a requested live-model or deployed-workload test. Run the actual workflow and inspect its result. A prompted acknowledgment alone does not prove tool dispatch: check the genuine tool call and result when claiming tool use.
+2. **Isolate execution when the host path is unsafe.** Do not run the host `amplifier` with a scratch `AMPLIFIER_HOME`: first-run module installation can change its shared tool environment. Use a DTU for runtime verification instead. Prefer the Docker Compose Smart Tool, `digital-twin-universe`, for new compatible environments; keep existing resources on their original backend. Its profiles and state are not interchangeable with Incus `amplifier-digital-twin`.
+3. **Discover before installing.** Check the selected executable's version, read its installed `--help`, and use `digital-twin-universe check` for Docker readiness. This is deterministic; `install` is model-backed Docker setup, not a readiness probe. For a missing tool, use the owning project's installation instructions: [DTU Smart Tool](https://github.com/microsoft/amplifier-smart-tool-digital-twin-universe#installation) and [optional legacy Amplifier Tester](https://github.com/microsoft/amplifier-bundle-amplifier-tester#installation).
+4. **Complete ordinary authorized setup.** A missing executable or agent is a setup task, not a reason to downgrade the test or hand routine steps back to the user. Install only the needed capability within the task's authority. Package installation, Docker readiness, workload credentials, and session-loaded agents are separate checks; the Smart CLI works without installing every bundle. Stop at actual permission, credential, license, or safety refusals; do not bypass them or silently upgrade shared tools.
+5. **Verify and clean up.** Inspect inner command exit status and semantic output, not just the outer wrapper's exit code. If a result is uncertain, inspect it before retrying. Forward only needed credentials by reference, never in logs or evidence. Retain required evidence, account for temporary resources below, and confirm owned cleanup.
+
 ## Session Lifecycle
 
 1. Workspace spun up fresh (already done)

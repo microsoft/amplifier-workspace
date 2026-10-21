@@ -12,6 +12,7 @@ from amplifier_workspace.workspace import (
     create_amplifier_settings,
     setup_workspace,
     run_workspace,
+    update_workspace,
 )
 
 
@@ -59,6 +60,27 @@ class TestCreateAgentsMd:
         create_agents_md(tmp_path, config)
         content = (tmp_path / "AGENTS.md").read_text()
         assert "amplifier" in content.lower()
+
+    def test_builtin_template_guides_requested_verification_and_bootstrap(self, tmp_path):
+        create_agents_md(tmp_path, WorkspaceConfig())
+        content = (tmp_path / "AGENTS.md").read_text()
+        guidance = content.split("## Verification and Missing Tools\n", 1)[1].split("\n## ", 1)[0]
+        for required in (
+            "do not replace a requested live-model",
+            "genuine tool call and result",
+            "scratch `AMPLIFIER_HOME`",
+            "Use a DTU for runtime verification instead",
+            "keep existing resources on their original backend",
+            "digital-twin-universe check",
+            "model-backed Docker setup",
+            "https://github.com/microsoft/amplifier-smart-tool-digital-twin-universe#installation",
+            "https://github.com/microsoft/amplifier-bundle-amplifier-tester#installation",
+            "Complete ordinary authorized setup",
+            "session-loaded agents are separate checks",
+            "Stop at actual permission",
+            "inner command exit status and semantic output",
+        ):
+            assert required in guidance
 
     def test_builtin_template_limits_manifest_to_workspace_cleanup(self, tmp_path: Path):
         """The installed scaffold must not turn task deliverables into cleanup debt."""
@@ -550,9 +572,6 @@ class TestLaunchWithTmux:
 # New tests for update_submodules in setup_workspace and update_workspace
 # (TDD: written before implementation)
 # ---------------------------------------------------------------------------
-
-from amplifier_workspace.workspace import update_workspace
-
 
 class TestSetupWorkspaceUpdateSubmodules:
     """setup_workspace must call update_submodules (not checkout_submodules) for new repos."""

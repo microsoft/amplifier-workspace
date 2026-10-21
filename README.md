@@ -116,6 +116,43 @@ When you run `amplifier-workspace ~/dev/fix-auth`, it creates:
 
 The workspace root is a local-only git repo -- use it for task-lifetime commits and reverts. The submodule directories are real GitHub repos -- commits and pushes there persist upstream.
 
+## Isolated Verification
+
+The scaffold points agents to the evidence the task requires. An explicit live-model
+request needs an actual model run; unit tests and a prompted acknowledgment are not
+substitutes for the requested workflow or a genuine tool-call/result check.
+
+For new compatible environments, prefer the
+[DTU Smart Tool](https://github.com/microsoft/amplifier-smart-tool-digital-twin-universe).
+It uses Docker Compose, not the legacy Incus backend. Keep existing resources on their
+original backend; profiles, state and executable names are not interchangeable.
+
+Check for `digital-twin-universe` first. If absent and userspace installation is
+authorized, install its core package (Python 3.13+ and uv required):
+
+```bash
+uv tool install git+https://github.com/microsoft/amplifier-smart-tool-digital-twin-universe
+digital-twin-universe --version
+digital-twin-universe --help
+digital-twin-universe check
+```
+
+For an existing install, start at version/help/check, not installation or upgrade.
+`check` reports Docker/Compose readiness without a model provider. `install` is
+model-backed Docker setup; `install --yes` applies host changes. Use the tool's
+[installation guide](https://github.com/microsoft/amplifier-smart-tool-digital-twin-universe#installation)
+for optional provider extras and credentials only when needed. Profile generation
+can launch verification environments; read command help before using it.
+
+The Smart CLI does not require a tester agent or global bundle registration.
+[Amplifier Tester](https://github.com/microsoft/amplifier-bundle-amplifier-tester#installation)
+is an optional Amplifier-specific **Incus** workflow, not a Compose adapter.
+Its installation guide covers composition when its agents are absent. Registering
+a bundle, installing a CLI and loading agents into the current session are
+different operations; verify the available agents after re-preparing or restarting
+the session. Do routine authorized setup directly, but do not infer permission to
+change host privileges, accept licenses, replace shared installs or expose secrets.
+
 ## Workspace Manifest
 
 `WORKSPACE-MANIFEST.json` is a **cleanup ledger, not a resource inventory**. It tracks temporary resources whose cleanup belongs to this workspace but that `-d`/`-f` cannot remove by deleting the directory: test DTUs/containers, extra tmux sessions, scratch Gitea instances/repos, temporary cloud test resources, and task-only files or caches outside the workspace.
@@ -136,7 +173,11 @@ amplifier-workspace manifest ~/dev/fix-auth --reap dtu-a1b2c3d4  # record actual
 
 Upgrading the CLI changes its packaged template and help, but does **not** overwrite an existing workspace's `AGENTS.md`, a configured custom template, or its manifest. `update` refreshes submodules only.
 
-After upgrading, run `amplifier-workspace doctor ~/dev/fix-auth` and reconcile the **Tracking External Resources** section with the cleanup-only scope above, preserving local edits. Update a configured custom template too.
+After upgrading, run `amplifier-workspace doctor ~/dev/fix-auth` and compare the
+workspace's instructions with the packaged template. Review **Verification and
+Missing Tools** and **Tracking External Resources**, preserving intentional local
+rules. Reconcile a configured custom template explicitly too; doctor skips its
+packaged-template drift check. Neither command rewrites your instructions.
 
 If a durable resource was mistakenly recorded, verify it is intended to survive, preserve its needed operational details in the owning project's durable records, and remove **only that misclassified entry** from `resources`. Leave real cleanup liabilities and their history intact. Do not mark a live resource `"reaped"` or `"observed_absent"`, invent a retention status, or delete the whole manifest to bypass the gate. The tool cannot infer intent from a resource's type or free-text notes and does not automatically reclassify entries.
 
