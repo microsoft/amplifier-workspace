@@ -179,6 +179,15 @@ Missing Tools** and **Tracking External Resources**, preserving intentional loca
 rules. Reconcile a configured custom template explicitly too; doctor skips its
 packaged-template drift check. Neither command rewrites your instructions.
 
+Also review lesson capture and **Working Memory**. Keep current conventions in
+`AGENTS.md` and the accepted objective, current decisions, blockers and next actions
+in `SCRATCH.md`. Preserve incident narratives and superseded instructions in
+investigation records or task history that is not automatically loaded. Retain
+current blockers and valid rules, and preserve each lesson's object, scope and
+phase rather than generalizing a past failure into a standing restriction.
+Do not replace an existing workspace file with the whole packaged template:
+reconcile the relevant sections while preserving intentional local guidance.
+
 If a durable resource was mistakenly recorded, verify it is intended to survive, preserve its needed operational details in the owning project's durable records, and remove **only that misclassified entry** from `resources`. Leave real cleanup liabilities and their history intact. Do not mark a live resource `"reaped"` or `"observed_absent"`, invent a retention status, or delete the whole manifest to bypass the gate. The tool cannot infer intent from a resource's type or free-text notes and does not automatically reclassify entries.
 
 ## Two Tiers
