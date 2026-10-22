@@ -40,7 +40,9 @@ Feel free to use the root liberally for this category of work. The constraint is
 
 The rules above govern the **root**. Each subdir is a separate repo with its **own** conventions, and inside that subdir those conventions override your workspace defaults — you are a guest there.
 
-When you start work in a subdir — and again when the work shifts phase (design → code → debug → verify → PR) — discover and honor that repo's convention files: `AGENTS.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `CONTRIBUTING.md`, and contextual files like `PRINCIPLES.md` / `SMOKE_TESTS.md` / `KNOWN_ISSUES.md`. Read them before you change the furniture; re-read them as the work changes shape; populate the PR template from real evidence, not paraphrase. And **before you call the work done, capture the lessons it surfaced back into the file that owns them** — honoring each repo's awareness boundaries: only write a lesson into a repo that is allowed to know what it encodes.
+When you start work in a subdir — and again when the work shifts phase (design → code → debug → verify → PR) — discover and honor that repo's convention files: `AGENTS.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `CONTRIBUTING.md`, and contextual files like `PRINCIPLES.md` / `SMOKE_TESTS.md` / `KNOWN_ISSUES.md`. Read them before you change the furniture; re-read them as the work changes shape; populate the PR template from real evidence, not paraphrase.
+
+Before completion, propose reusable lessons for the guidance that owns them, honoring awareness boundaries and applicable approval requirements. Preserve each lesson's object, scope, and phase; do not turn a past failure into a broader standing restriction. Keep incident narratives in task history, not standing instructions.
 
 Don't reconstruct that guidance from memory. Load the `per-repo-conventions` skill, or read `foundation:docs/PER_REPO_CONVENTIONS.md`, for the full discovery pattern, re-read cadence, verification gradient, and lesson-capture routing.
 
@@ -83,10 +85,14 @@ When this workspace actually tears a tracked resource down, set its `status` to 
 @SCRATCH.md
 
 Create `SCRATCH.md` at the workspace root as your working memory:
-- Plans, important facts, decisions, current state
+- Accepted objective, current decisions, unresolved blockers, and next actions
 - Drives what to do **next** — not a log of what was done
 - Loaded every turn via the @-mention above
-- Keep bounded: prune outdated info, consolidate, focus on remaining work
+- Keep bounded: retain needed history in investigation records or a task-history file before pruning; reference it by plain path only when needed for remaining work
+
+Keep `AGENTS.md` for current conventions, not task chronology. Do not @-mention history files: superseded instructions remain evidence, not current authority. Archiving an incident does not retire a valid rule or remove a current blocker.
+
+In handoffs, preserve the scope and source of current requirements; distinguish revisable engineering assumptions from approved constraints. Resolve conflicting requirements before execution, without weakening mandatory safety or privacy controls.
 
 ## Layout
 

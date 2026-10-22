@@ -102,6 +102,50 @@ class TestCreateAgentsMd:
         assert "Do not mark a live resource" in content
         assert "Preserve genuine cleanup entries and their history" in content
 
+    def test_builtin_template_keeps_lessons_scoped(self, tmp_path: Path):
+        create_agents_md(tmp_path, WorkspaceConfig())
+        content = (tmp_path / "AGENTS.md").read_text()
+        guidance = content.split("## Each Subdir Is a Repo With Its Own Rules\n", 1)[1].split(
+            "\n## ", 1
+        )[0]
+        assert "propose reusable lessons" in guidance
+        assert "applicable approval requirements" in guidance
+        assert "object, scope, and phase" in guidance
+        assert "do not turn a past failure into a broader standing restriction" in guidance
+        assert "Keep incident narratives in task history, not standing instructions" in guidance
+        assert "capture the lessons it surfaced back" not in guidance
+
+    def test_builtin_template_separates_current_memory_from_history(self, tmp_path: Path):
+        create_agents_md(tmp_path, WorkspaceConfig())
+        content = (tmp_path / "AGENTS.md").read_text()
+        guidance = content.split("## Working Memory\n", 1)[1].split("\n## ", 1)[0]
+        assert "@SCRATCH.md" in guidance
+        assert "Accepted objective, current decisions, unresolved blockers, and next actions" in guidance
+        assert "retain needed history" in guidance
+        assert "before pruning" in guidance
+        assert "reference it by plain path only when needed for remaining work" in guidance
+        assert "Do not @-mention history files" in guidance
+        assert "superseded instructions remain evidence, not current authority" in guidance
+        assert "does not retire a valid rule or remove a current blocker" in guidance
+        assert "scope and source of current requirements" in guidance
+        assert "revisable engineering assumptions" in guidance
+        assert "without weakening mandatory safety or privacy controls" in guidance
+
+    def test_new_guidance_preserves_existing_memory_and_history(self, tmp_path: Path):
+        agents = tmp_path / "AGENTS.md"
+        scratch = tmp_path / "SCRATCH.md"
+        history = tmp_path / "task-history.md"
+        original = {
+            scratch: b"# Current work\r\nAwait the approved private handoff.\r\n",
+            history: b"# Task history\r\nRetain the earlier investigation.\r\n",
+        }
+        for path, data in original.items():
+            path.write_bytes(data)
+        assert not agents.exists()
+        create_agents_md(tmp_path, WorkspaceConfig())
+        assert "superseded instructions remain evidence, not current authority" in agents.read_text()
+        assert {path: path.read_bytes() for path in original} == original
+
 
 class TestCreateAmplifierSettings:
     def test_default_settings_yaml_is_exact(self, tmp_path: Path):
